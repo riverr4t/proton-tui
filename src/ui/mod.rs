@@ -235,13 +235,19 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
+    // Build country title with counts
+    let country_title = if is_searching {
+        format!(
+            " Countries ({}/{}) ",
+            app.country_list.len(),
+            app.full_country_list.len()
+        )
+    } else {
+        format!(" Countries ({}) ", app.full_country_list.len())
+    };
+
     if is_searching && app.country_list.is_empty() {
-        render_empty_list(
-            frame,
-            split_chunks[0],
-            " Countries ".to_string(),
-            country_border_style,
-        );
+        render_empty_list(frame, split_chunks[0], country_title, country_border_style);
     } else {
         let country_items: Vec<ListItem> = app
             .country_list
@@ -278,7 +284,7 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Countries ")
+                    .title(country_title)
                     .border_style(country_border_style),
             )
             .highlight_style(country_highlight_style)
@@ -294,13 +300,27 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
-    // Get selected country name for title
-    let selected_country_name = app
-        .country_state
-        .selected()
-        .and_then(|idx| app.country_list.get(idx))
-        .map(|code| format!("Servers - {}", countries::get_country_name(code)))
-        .unwrap_or_else(|| "Servers".to_string());
+    // Get selected country name for title with counts
+    let selected_country_name = if is_searching {
+        format!(
+            "Servers ({}/{})",
+            app.server_list.len(),
+            app.all_servers.len()
+        )
+    } else {
+        app.country_state
+            .selected()
+            .and_then(|idx| app.country_list.get(idx))
+            .map(|code| {
+                format!(
+                    "Servers - {} ({}/{})",
+                    countries::get_country_name(code),
+                    app.server_list.len(),
+                    app.all_servers.len()
+                )
+            })
+            .unwrap_or_else(|| format!("Servers ({})", app.all_servers.len()))
+    };
 
     let server_list_title =
         add_connected_badge(&selected_country_name, app.connection_status.is_some());
