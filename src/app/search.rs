@@ -64,8 +64,13 @@ impl App {
         let country_name = countries::get_country_name(&server.exit_country);
 
         // Get best score from country, city, or server name
-        let country_score = Self::match_score(&country_name, query)
-            .min(Self::match_score(&server.exit_country, query));
+        let country_score = [
+            Self::match_score(&country_name, query),
+            Self::match_score(&server.exit_country, query),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         let city_score = Self::match_score(&server.city, query);
         let name_score = Self::match_score(&server.name, query);
 
