@@ -49,6 +49,7 @@
 *   **Install:** `cargo install --path .`
 
 ## Development Conventions
+*   **Commit Messages:** Follow the [Conventional Commits](https://www.conventionalcommits.org/) specification (e.g., `feat:`, `fix:`, `docs:`, `refactor:`).
 *   **Async/Await:** Heavy use of `tokio` for non-blocking I/O (network requests, key polling).
 *   **Error Handling:** Uses `anyhow::Result` for simplified error propagation.
 *   **State Management:** The `App` struct is the single source of truth for the UI. Logic is split into trait extensions or helper modules within `src/app/`.

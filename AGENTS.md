@@ -21,7 +21,7 @@ Use Rust 2021 defaults and `rustfmt` conventions (4-space indentation, trailing 
 There are no unit or integration tests yet. When adding tests, prefer `#[cfg(test)] mod tests` near the code under test or `tests/` for integration tests; name test functions `test_*`. Run `cargo test` locally before opening a PR. No coverage targets are defined.
 
 ## Commit & Pull Request Guidelines
-The current Git history contains only an `initial commit`, so no established message convention exists. Use concise, imperative subjects (e.g., `Add split-view search`) and include a brief body when behavior changes. PRs should include a summary, the commands you ran (e.g., `cargo test`), and link any related issues. For UI changes, update `assets/screenshot.png` if the interface is visibly different.
+Use the Conventional Commits specification for all commit messages: `type(scope): subject`. Common types include `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, and `ci`. Scopes are optional; use them when helpful (e.g., `ui`, `app`, `auth`). Add `!` for breaking changes and include a `BREAKING CHANGE:` footer when relevant. Include a brief body when behavior changes. PRs should include a summary, the commands you ran (e.g., `cargo test`), and link any related issues. For UI changes, update `assets/screenshot.png` if the interface is visibly different.
 
 ## Security & Configuration Notes
 This project targets Linux and relies on `wireguard-tools` plus `sudo wg-quick`. Avoid committing credentials or generated configs; runtime configs are written to `/tmp/proton-tui0.conf` with restricted permissions.

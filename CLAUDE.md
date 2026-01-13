@@ -66,6 +66,41 @@ Ratatui-based rendering with two view modes:
 - Requires sudo for VPN operations
 - DNS is not modified (relies on system DNS)
 
+## Conventional Commits
+
+All commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:**
+- `feat` - New feature
+- `fix` - Bug fix
+- `docs` - Documentation only
+- `refactor` - Code change that neither fixes a bug nor adds a feature
+- `test` - Adding or updating tests
+- `chore` - Maintenance tasks (deps, config)
+- `ci` - CI/CD changes
+
+**Scopes** (optional): `ui`, `app`, `auth`, `api`, `wireguard`
+
+**Breaking changes:** Add `!` after type/scope and include `BREAKING CHANGE:` footer.
+
+**Examples:**
+```
+feat(ui): add split view mode for server selection
+fix(auth): handle expired refresh tokens correctly
+docs: update architecture overview
+refactor(app)!: restructure connection state handling
+
+BREAKING CHANGE: ConnectionStatus enum variants renamed
+```
+
 ## Dependencies
 
 Key crates: `ratatui` (TUI), `crossterm` (terminal), `reqwest` (HTTP), `tokio` (async), `ed25519-dalek`/`sha2`/`bcrypt`/`num-bigint` (SRP crypto).
