@@ -193,7 +193,21 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
                 app.page_down();
             }
         }
+        KeyCode::Char('d') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+            if app.split_view {
+                app.split_page_down();
+            } else {
+                app.page_down();
+            }
+        }
         KeyCode::PageUp => {
+            if app.split_view {
+                app.split_page_up();
+            } else {
+                app.page_up();
+            }
+        }
+        KeyCode::Char('u') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
             if app.split_view {
                 app.split_page_up();
             } else {

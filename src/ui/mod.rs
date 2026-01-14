@@ -701,10 +701,10 @@ fn render_help_popup(frame: &mut Frame) {
             Span::styled("Last item", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  PgUp       ", key_style),
+            Span::styled("  PgUp/Ctrl-u ", key_style),
             Span::styled("Page up", desc_style),
-            Span::styled("            ", desc_style),
-            Span::styled("  PgDn      ", key_style),
+            Span::styled("         ", desc_style),
+            Span::styled("  PgDn/Ctrl-d ", key_style),
             Span::styled("Page down", desc_style),
         ]),
         Line::from(""),
