@@ -17,7 +17,7 @@ use crate::models::LogicalServer;
 
 pub struct App {
     pub all_servers: Vec<LogicalServer>,
-    pub sorted_server_indices: Vec<usize>, // Pre-sorted by country, exit IP, name
+    pub sorted_server_indices: Vec<usize>, // Pre-sorted by country, entry IP, name
     pub displayed_items: Vec<DisplayItem>,
     pub state: ListState,
     pub client: ProtonClient,
@@ -29,8 +29,8 @@ pub struct App {
     pub search_query: String,
     pub search_cursor_position: usize,
     pub expanded_countries: HashSet<String>,
-    pub expanded_exit_ips: HashSet<(String, String)>, // (country_code, exit_ip)
-    pub group_by_exit_ip: bool,
+    pub expanded_entry_ips: HashSet<(String, String)>, // (country_code, entry_ip)
+    pub group_by_entry_ip: bool,
     pub server_counts: HashMap<String, usize>,
     pub should_redraw: bool,
     pub connection_status: Option<ConnectionStatus>,
@@ -48,11 +48,11 @@ pub struct App {
 }
 
 impl App {
-    fn get_exit_ip_for_server(server: &LogicalServer) -> &str {
+    fn get_entry_ip_for_server(server: &LogicalServer) -> &str {
         server
             .servers
             .first()
-            .map(|s| s.exit_ip.as_str())
+            .map(|s| s.entry_ip.as_str())
             .unwrap_or("")
     }
 
@@ -66,7 +66,7 @@ impl App {
         let mut country_list: Vec<String> = counts.keys().cloned().collect();
         country_list.sort_by_key(|a| countries::get_country_name(a));
 
-        // Pre-compute sorted server indices (by country name, exit IP, server name)
+        // Pre-compute sorted server indices (by country name, entry IP, server name)
         let mut sorted_indices: Vec<usize> = (0..servers.len()).collect();
         sorted_indices.sort_by(|&a, &b| {
             let server_a = &servers[a];
@@ -76,10 +76,10 @@ impl App {
             if country_cmp != std::cmp::Ordering::Equal {
                 return country_cmp;
             }
-            let exit_ip_cmp =
-                Self::get_exit_ip_for_server(server_a).cmp(Self::get_exit_ip_for_server(server_b));
-            if exit_ip_cmp != std::cmp::Ordering::Equal {
-                return exit_ip_cmp;
+            let entry_ip_cmp = Self::get_entry_ip_for_server(server_a)
+                .cmp(Self::get_entry_ip_for_server(server_b));
+            if entry_ip_cmp != std::cmp::Ordering::Equal {
+                return entry_ip_cmp;
             }
             server_a.name.cmp(&server_b.name)
         });
@@ -111,8 +111,8 @@ impl App {
             search_query: String::new(),
             search_cursor_position: 0,
             expanded_countries: HashSet::new(),
-            expanded_exit_ips: HashSet::new(),
-            group_by_exit_ip: true,
+            expanded_entry_ips: HashSet::new(),
+            group_by_entry_ip: true,
             server_counts: counts,
             should_redraw: false,
             connection_status: None,
@@ -144,8 +144,8 @@ impl App {
         self.status_message = msg;
     }
 
-    pub fn toggle_group_by_exit_ip(&mut self) {
-        self.group_by_exit_ip = !self.group_by_exit_ip;
+    pub fn toggle_group_by_entry_ip(&mut self) {
+        self.group_by_entry_ip = !self.group_by_entry_ip;
         if self.split_view {
             if self.search_query.is_empty() {
                 self.update_server_list_for_selected_country();

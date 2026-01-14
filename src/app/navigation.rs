@@ -78,12 +78,12 @@ impl App {
                         }
                         self.update_display_list();
                     }
-                    DisplayItem::ExitIpHeader(country, exit_ip) => {
-                        let key = (country, exit_ip);
-                        if self.expanded_exit_ips.contains(&key) {
-                            self.expanded_exit_ips.remove(&key);
+                    DisplayItem::EntryIpHeader(country, entry_ip) => {
+                        let key = (country, entry_ip);
+                        if self.expanded_entry_ips.contains(&key) {
+                            self.expanded_entry_ips.remove(&key);
                         } else {
-                            self.expanded_exit_ips.insert(key);
+                            self.expanded_entry_ips.insert(key);
                         }
                         self.update_display_list();
                     }
@@ -105,10 +105,10 @@ impl App {
                             self.update_display_list();
                         }
                     }
-                    DisplayItem::ExitIpHeader(country, exit_ip) => {
-                        let key = (country, exit_ip);
-                        if !self.expanded_exit_ips.contains(&key) {
-                            self.expanded_exit_ips.insert(key);
+                    DisplayItem::EntryIpHeader(country, entry_ip) => {
+                        let key = (country, entry_ip);
+                        if !self.expanded_entry_ips.contains(&key) {
+                            self.expanded_entry_ips.insert(key);
                             self.update_display_list();
                         }
                     }
@@ -128,10 +128,10 @@ impl App {
                             self.update_display_list();
                         }
                     }
-                    DisplayItem::ExitIpHeader(country, exit_ip) => {
-                        let key = (country.clone(), exit_ip);
-                        if self.expanded_exit_ips.contains(&key) {
-                            self.expanded_exit_ips.remove(&key);
+                    DisplayItem::EntryIpHeader(country, entry_ip) => {
+                        let key = (country.clone(), entry_ip);
+                        if self.expanded_entry_ips.contains(&key) {
+                            self.expanded_entry_ips.remove(&key);
                             self.update_display_list();
                         } else {
                             // Already collapsed, collapse parent country
@@ -153,21 +153,21 @@ impl App {
                     DisplayItem::Server(server_idx) => {
                         let server = &self.all_servers[server_idx];
                         let country = server.exit_country.clone();
-                        let exit_ip = server
+                        let entry_ip = server
                             .servers
                             .first()
-                            .map(|s| s.exit_ip.clone())
+                            .map(|s| s.entry_ip.clone())
                             .unwrap_or_default();
-                        let key = (country.clone(), exit_ip.clone());
+                        let key = (country.clone(), entry_ip.clone());
 
-                        if self.expanded_exit_ips.contains(&key) {
-                            // Collapse the exit IP group
-                            self.expanded_exit_ips.remove(&key);
+                        if self.expanded_entry_ips.contains(&key) {
+                            // Collapse the entry IP group
+                            self.expanded_entry_ips.remove(&key);
                             self.update_display_list();
 
-                            // Find the exit IP header and select it
+                            // Find the entry IP header and select it
                             if let Some(header_pos) = self.displayed_items.iter().position(|it| {
-                                matches!(it, DisplayItem::ExitIpHeader(c, ip) if c == &country && ip == &exit_ip)
+                                matches!(it, DisplayItem::EntryIpHeader(c, ip) if c == &country && ip == &entry_ip)
                             }) {
                                 self.state.select(Some(header_pos));
                             }

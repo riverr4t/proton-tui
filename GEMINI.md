@@ -54,6 +54,7 @@
 *   **Error Handling:** Uses `anyhow::Result` for simplified error propagation.
 *   **State Management:** The `App` struct is the single source of truth for the UI. Logic is split into trait extensions or helper modules within `src/app/`.
 *   **UI Refresh:** The UI is reactive; `app.should_redraw` triggers a render pass.
+*   **Formatting:** Run `cargo fmt` before committing to ensure consistent code style.
 
 ## Notes
 *   **Security:** The app handles credentials. Ensure strict review of any changes to `auth.rs` or `tokens.rs`.

@@ -135,7 +135,7 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
             app.toggle_split_view();
         }
         KeyCode::Char('i') => {
-            app.toggle_group_by_exit_ip();
+            app.toggle_group_by_entry_ip();
         }
         KeyCode::Tab => {
             if app.split_view {

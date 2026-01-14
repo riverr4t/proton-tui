@@ -17,7 +17,7 @@ impl App {
                     if let Some(item) = self.displayed_items.get(idx) {
                         let country_code = match item {
                             DisplayItem::CountryHeader(c) => c.clone(),
-                            DisplayItem::ExitIpHeader(c, _) => c.clone(),
+                            DisplayItem::EntryIpHeader(c, _) => c.clone(),
                             DisplayItem::Server(server_idx) => {
                                 self.all_servers[*server_idx].exit_country.clone()
                             }
@@ -44,11 +44,11 @@ impl App {
         }
     }
 
-    fn get_exit_ip_for_idx(&self, idx: usize) -> String {
+    fn get_entry_ip_for_idx(&self, idx: usize) -> String {
         self.all_servers[idx]
             .servers
             .first()
-            .map(|s| s.exit_ip.clone())
+            .map(|s| s.entry_ip.clone())
             .unwrap_or_default()
     }
 
@@ -65,23 +65,23 @@ impl App {
                     .map(|(i, _)| i)
                     .collect();
 
-                // Sort by exit IP then name for consistent grouping
+                // Sort by entry IP then name for consistent grouping
                 server_indices.sort_by(|&a, &b| {
-                    let ip_a = self.get_exit_ip_for_idx(a);
-                    let ip_b = self.get_exit_ip_for_idx(b);
+                    let ip_a = self.get_entry_ip_for_idx(a);
+                    let ip_b = self.get_entry_ip_for_idx(b);
                     ip_a.cmp(&ip_b)
                         .then(self.all_servers[a].name.cmp(&self.all_servers[b].name))
                 });
 
-                if self.group_by_exit_ip {
-                    let mut current_exit_ip = String::new();
+                if self.group_by_entry_ip {
+                    let mut current_entry_ip = String::new();
                     for i in server_indices {
-                        let exit_ip = self.get_exit_ip_for_idx(i);
-                        if exit_ip != current_exit_ip {
-                            current_exit_ip = exit_ip.clone();
-                            self.split_server_items.push(DisplayItem::ExitIpHeader(
+                        let entry_ip = self.get_entry_ip_for_idx(i);
+                        if entry_ip != current_entry_ip {
+                            current_entry_ip = entry_ip.clone();
+                            self.split_server_items.push(DisplayItem::EntryIpHeader(
                                 country_code.clone(),
-                                current_exit_ip.clone(),
+                                current_entry_ip.clone(),
                             ));
                         }
                         self.split_server_items.push(DisplayItem::Server(i));
@@ -126,29 +126,31 @@ impl App {
         // 1. Find ALL matching servers with scores (regardless of country)
         let mut scored_servers = self.collect_scored_servers(query);
 
-        // Sort by score (lower is better), then by exit IP, then by server name
+        // Sort by score (lower is better), then by entry IP, then by server name
         scored_servers.sort_by(|a, b| {
             let score_cmp = a.1.cmp(&b.1);
             if score_cmp != std::cmp::Ordering::Equal {
                 return score_cmp;
             }
-            let ip_a = self.get_exit_ip_for_idx(a.0);
-            let ip_b = self.get_exit_ip_for_idx(b.0);
+            let ip_a = self.get_entry_ip_for_idx(a.0);
+            let ip_b = self.get_entry_ip_for_idx(b.0);
             ip_a.cmp(&ip_b)
                 .then(self.all_servers[a.0].name.cmp(&self.all_servers[b.0].name))
         });
 
         // Build split_server_items with optional IP grouping
         self.split_server_items.clear();
-        if self.group_by_exit_ip {
-            let mut current_exit_ip = String::new();
+        if self.group_by_entry_ip {
+            let mut current_entry_ip = String::new();
             for (idx, _) in scored_servers {
-                let exit_ip = self.get_exit_ip_for_idx(idx);
+                let entry_ip = self.get_entry_ip_for_idx(idx);
                 let country = self.all_servers[idx].exit_country.clone();
-                if exit_ip != current_exit_ip {
-                    current_exit_ip = exit_ip.clone();
-                    self.split_server_items
-                        .push(DisplayItem::ExitIpHeader(country, current_exit_ip.clone()));
+                if entry_ip != current_entry_ip {
+                    current_entry_ip = entry_ip.clone();
+                    self.split_server_items.push(DisplayItem::EntryIpHeader(
+                        country,
+                        current_entry_ip.clone(),
+                    ));
                 }
                 self.split_server_items.push(DisplayItem::Server(idx));
             }

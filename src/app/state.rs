@@ -15,8 +15,8 @@ pub enum SplitFocus {
 #[derive(Clone, PartialEq)]
 pub enum DisplayItem {
     CountryHeader(String),
-    ExitIpHeader(String, String), // (country_code, exit_ip)
-    Server(usize),                // Index in all_servers
+    EntryIpHeader(String, String), // (country_code, entry_ip)
+    Server(usize),                 // Index in all_servers
 }
 
 pub struct ConnectionStatus {

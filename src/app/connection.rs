@@ -239,13 +239,13 @@ impl App {
                 }
                 self.update_display_list();
             }
-            DisplayItem::ExitIpHeader(country, exit_ip) => {
-                // Toggle expand/collapse on Enter for exit IP headers
-                let key = (country.clone(), exit_ip.clone());
-                if self.expanded_exit_ips.contains(&key) {
-                    self.expanded_exit_ips.remove(&key);
+            DisplayItem::EntryIpHeader(country, entry_ip) => {
+                // Toggle expand/collapse on Enter for entry IP headers
+                let key = (country.clone(), entry_ip.clone());
+                if self.expanded_entry_ips.contains(&key) {
+                    self.expanded_entry_ips.remove(&key);
                 } else {
-                    self.expanded_exit_ips.insert(key);
+                    self.expanded_entry_ips.insert(key);
                 }
                 self.update_display_list();
             }

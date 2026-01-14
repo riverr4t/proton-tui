@@ -168,17 +168,17 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled(format!("[{}]", count), Style::default().fg(Color::DarkGray)),
                 ]))
             }
-            DisplayItem::ExitIpHeader(country_code, exit_ip) => {
-                let key = (country_code.clone(), exit_ip.clone());
-                let is_expanded = app.expanded_exit_ips.contains(&key);
+            DisplayItem::EntryIpHeader(country_code, entry_ip) => {
+                let key = (country_code.clone(), entry_ip.clone());
+                let is_expanded = app.expanded_entry_ips.contains(&key);
 
-                // Count servers with this exit IP in this country
+                // Count servers with this entry IP in this country
                 let server_count = app
                     .all_servers
                     .iter()
                     .filter(|s| {
                         &s.exit_country == country_code
-                            && s.servers.first().map(|i| &i.exit_ip) == Some(exit_ip)
+                            && s.servers.first().map(|i| &i.entry_ip) == Some(entry_ip)
                     })
                     .count();
 
@@ -195,7 +195,7 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 ListItem::new(Line::from(vec![
                     Span::styled(format!("   {} ", icon), style),
-                    Span::styled(format!("{} ", exit_ip), style),
+                    Span::styled(format!("{} ", entry_ip), style),
                     Span::styled(
                         format!("[{}]", server_count),
                         Style::default().fg(Color::DarkGray),
@@ -375,9 +375,9 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
             .split_server_items
             .iter()
             .map(|item| match item {
-                DisplayItem::ExitIpHeader(_, exit_ip) => {
+                DisplayItem::EntryIpHeader(_, entry_ip) => {
                     ListItem::new(Line::from(vec![Span::styled(
-                        format!(" {} ", exit_ip),
+                        format!(" {} ", entry_ip),
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
