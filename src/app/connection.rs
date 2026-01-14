@@ -180,7 +180,9 @@ impl App {
                         ConfigTarget::Saved => match Self::get_saved_config_path() {
                             Some(path) => path,
                             None => {
-                                self.log("Error: Could not determine config directory.".to_string());
+                                self.log(
+                                    "Error: Could not determine config directory.".to_string(),
+                                );
                                 return None;
                             }
                         },

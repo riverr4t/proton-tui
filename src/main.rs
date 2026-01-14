@@ -145,9 +145,7 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
         KeyCode::Char('s') => {
             if app.split_view {
                 if let Some(server_idx) = app.get_selected_server_idx_in_split() {
-                    let _ = app
-                        .create_config(server_idx, ConfigTarget::Saved)
-                        .await;
+                    let _ = app.create_config(server_idx, ConfigTarget::Saved).await;
                 }
             } else {
                 app.save_selected_config().await;

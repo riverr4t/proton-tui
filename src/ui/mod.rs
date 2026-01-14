@@ -481,7 +481,23 @@ fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
     let sep_style = Style::default().fg(Color::DarkGray);
     let desc_style = Style::default().fg(Color::Gray);
 
-    let hints = if app.input_mode == InputMode::Search {
+    let hints = if app.show_help_popup {
+        // Help popup: any key closes it
+        Line::from(vec![
+            Span::styled(" Any Key ", key_style),
+            Span::styled(" Close ", desc_style),
+        ])
+    } else if app.show_connection_popup {
+        // Connection popup: disconnect or close
+        Line::from(vec![
+            Span::styled(" d ", key_style),
+            Span::styled(" Disconnect ", desc_style),
+            Span::styled(" | ", sep_style),
+            Span::styled(" Esc ", key_style),
+            Span::styled(" Close ", desc_style),
+        ])
+    } else if app.input_mode == InputMode::Search {
+        // Search mode: confirm, cancel, help
         Line::from(vec![
             Span::styled(" Enter ", key_style),
             Span::styled(" Confirm ", desc_style),
@@ -489,61 +505,62 @@ fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Esc ", key_style),
             Span::styled(" Cancel ", desc_style),
             Span::styled(" | ", sep_style),
-            Span::styled(" Ctrl+U ", key_style),
-            Span::styled(" Clear ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Ctrl+W ", key_style),
-            Span::styled(" Del Word ", desc_style),
+            Span::styled(" ? ", key_style),
+            Span::styled(" Help ", desc_style),
         ])
     } else if app.split_view {
-        let ip_group_label = if app.group_by_exit_ip {
-            " IP:On "
-        } else {
-            " IP:Off "
-        };
-        Line::from(vec![
-            Span::styled(" / ", key_style),
-            Span::styled(" Search ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Tab ", key_style),
-            Span::styled(" Switch ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Enter ", key_style),
-            Span::styled(" Connect ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" i ", key_style),
-            Span::styled(ip_group_label, desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" s ", key_style),
-            Span::styled(" Save ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Esc ", key_style),
-            Span::styled(" Back ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" q ", key_style),
-            Span::styled(" Quit ", desc_style),
-        ])
+        // Split view: pane-specific hints
+        match app.split_focus {
+            SplitFocus::Countries => {
+                // Countries pane focused
+                Line::from(vec![
+                    Span::styled(" Tab ", key_style),
+                    Span::styled(" Switch ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" Enter ", key_style),
+                    Span::styled(" Select ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" v ", key_style),
+                    Span::styled(" Tree ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" ? ", key_style),
+                    Span::styled(" Help ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" q ", key_style),
+                    Span::styled(" Quit ", desc_style),
+                ])
+            }
+            SplitFocus::Servers => {
+                // Servers pane focused
+                Line::from(vec![
+                    Span::styled(" Tab ", key_style),
+                    Span::styled(" Switch ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" Enter ", key_style),
+                    Span::styled(" Connect ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" ← ", key_style),
+                    Span::styled(" Back ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" ? ", key_style),
+                    Span::styled(" Help ", desc_style),
+                    Span::styled(" | ", sep_style),
+                    Span::styled(" q ", key_style),
+                    Span::styled(" Quit ", desc_style),
+                ])
+            }
+        }
     } else {
-        let ip_group_label = if app.group_by_exit_ip {
-            " IP:On "
-        } else {
-            " IP:Off "
-        };
+        // Tree view: essential navigation hints
         Line::from(vec![
             Span::styled(" / ", key_style),
             Span::styled(" Search ", desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" Enter ", key_style),
             Span::styled(" Connect ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" s ", key_style),
-            Span::styled(" Save ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" i ", key_style),
-            Span::styled(ip_group_label, desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" v ", key_style),
-            Span::styled(" Split View ", desc_style),
+            Span::styled(" Split ", desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" ? ", key_style),
             Span::styled(" Help ", desc_style),
