@@ -442,8 +442,8 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let stats = format!(
-        "Servers: {} | Entry IPs: {} | Exit IPs: {}",
-        app.total_servers, app.unique_entry_ips, app.unique_exit_ips
+        "Servers: {} | Entry IPs: {}",
+        app.total_servers, app.unique_entry_ips
     );
 
     let footer_text = if let Some(status) = &app.connection_status {

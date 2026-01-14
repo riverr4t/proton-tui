@@ -23,7 +23,6 @@ pub struct App {
     pub client: ProtonClient,
     pub total_servers: usize,
     pub unique_entry_ips: usize,
-    pub unique_exit_ips: usize,
     pub status_message: String,
     pub input_mode: InputMode,
     pub search_query: String,
@@ -84,18 +83,15 @@ impl App {
             server_a.name.cmp(&server_b.name)
         });
 
-        // Compute unique entry and exit IPs
+        // Compute unique entry IPs
         let mut entry_ips: HashSet<&str> = HashSet::new();
-        let mut exit_ips: HashSet<&str> = HashSet::new();
         for server in &servers {
             for instance in &server.servers {
                 entry_ips.insert(&instance.entry_ip);
-                exit_ips.insert(&instance.exit_ip);
             }
         }
         let total_servers = servers.len();
         let unique_entry_ips = entry_ips.len();
-        let unique_exit_ips = exit_ips.len();
 
         let mut app = App {
             all_servers: servers,
@@ -105,7 +101,6 @@ impl App {
             client,
             total_servers,
             unique_entry_ips,
-            unique_exit_ips,
             status_message: String::new(),
             input_mode: InputMode::Normal,
             search_query: String::new(),
