@@ -4,11 +4,16 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::os::unix::fs::PermissionsExt;
-use std::{fs, io, path::PathBuf, time::Instant};
+use std::{env, fs, io, path::PathBuf, time::Instant};
 use tokio::process::Command;
 
 use super::{App, ConnectionStatus, DisplayItem};
 use crate::wireguard;
+
+pub enum ConfigTarget {
+    Runtime,
+    Saved,
+}
 
 fn suspend_tui() {
     let _ = disable_raw_mode();
@@ -25,8 +30,22 @@ impl App {
         "proton-tui0".to_string()
     }
 
-    pub fn get_config_path() -> PathBuf {
-        PathBuf::from(format!("/tmp/{}.conf", Self::get_interface_name()))
+    fn get_runtime_config_dir() -> PathBuf {
+        let runtime_dir = env::var_os("XDG_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"));
+        runtime_dir.join("proton-tui")
+    }
+
+    pub fn get_runtime_config_path() -> PathBuf {
+        Self::get_runtime_config_dir().join(format!("{}.conf", Self::get_interface_name()))
+    }
+
+    pub fn get_saved_config_path() -> Option<PathBuf> {
+        dirs::config_dir().map(|dir| {
+            dir.join("proton-tui")
+                .join(format!("{}.conf", Self::get_interface_name()))
+        })
     }
 
     pub async fn start_wireguard(&mut self, config_path: &str, server_name: String) {
@@ -80,7 +99,7 @@ impl App {
 
         println!("Stopping WireGuard... (Sudo password may be required)");
 
-        let config_path = Self::get_config_path();
+        let config_path = Self::get_runtime_config_path();
         let status = Command::new("sudo")
             .arg("wg-quick")
             .arg("down")
@@ -118,7 +137,11 @@ impl App {
         }
     }
 
-    pub async fn create_config(&mut self, server_idx: usize) -> Option<PathBuf> {
+    pub async fn create_config(
+        &mut self,
+        server_idx: usize,
+        target: ConfigTarget,
+    ) -> Option<PathBuf> {
         if let Some(server) = self.all_servers.get(server_idx).cloned() {
             self.log(format!("Generating config for {}...", server.name));
 
@@ -152,7 +175,22 @@ impl App {
                         &server.name,
                     );
 
-                    let config_path = Self::get_config_path();
+                    let config_path = match target {
+                        ConfigTarget::Runtime => Self::get_runtime_config_path(),
+                        ConfigTarget::Saved => match Self::get_saved_config_path() {
+                            Some(path) => path,
+                            None => {
+                                self.log("Error: Could not determine config directory.".to_string());
+                                return None;
+                            }
+                        },
+                    };
+                    if let Some(parent) = config_path.parent() {
+                        if let Err(e) = fs::create_dir_all(parent) {
+                            self.log(format!("Error creating config directory: {}", e));
+                            return None;
+                        }
+                    }
                     if let Err(e) = fs::write(&config_path, config_content) {
                         self.log(format!("Error writing config file: {}", e));
                         return None;
@@ -212,7 +250,7 @@ impl App {
             DisplayItem::Server(server_idx) => {
                 let idx = *server_idx;
 
-                if let Some(config_path) = self.create_config(idx).await {
+                if let Some(config_path) = self.create_config(idx, ConfigTarget::Runtime).await {
                     if let Some(server) = self.all_servers.get(idx) {
                         self.start_wireguard(
                             config_path.to_str().unwrap_or("wg0.conf"),
@@ -237,7 +275,7 @@ impl App {
         };
 
         if let DisplayItem::Server(server_idx) = item {
-            let _ = self.create_config(*server_idx).await;
+            let _ = self.create_config(*server_idx, ConfigTarget::Saved).await;
         }
     }
 }

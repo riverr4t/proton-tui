@@ -120,7 +120,7 @@ rm ~/.config/proton-tui/tokens.json
 
 ## 🛠️ Technical Details
 
-*   **Config Storage**: Temporary WireGuard configurations are written to `/tmp/proton-tui0.conf` with restricted permissions (`600`).
+*   **Config Storage**: Temporary WireGuard configurations are written to `$XDG_RUNTIME_DIR/proton-tui/proton-tui0.conf` (falling back to `/tmp/proton-tui/proton-tui0.conf`) with restricted permissions (`600`). Saved configs go to `$XDG_CONFIG_HOME/proton-tui/proton-tui0.conf`.
 *   **Authentication**: Uses Proton's SRP (Secure Remote Password) protocol for login. Tokens are cached locally for subsequent sessions.
 *   **Networking**: Spawns `sudo wg-quick up/down` processes to manage the `proton-tui0` network interface.
 *   **DNS**: The application does **not** modify your DNS settings. It relies on your system's existing DNS configuration.

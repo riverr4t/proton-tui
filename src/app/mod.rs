@@ -4,6 +4,7 @@ mod search;
 mod split_view;
 mod state;
 
+pub use connection::ConfigTarget;
 pub use state::{ConnectionStatus, DisplayItem, InputMode, SplitFocus};
 
 use ratatui::widgets::ListState;

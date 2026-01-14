@@ -21,7 +21,7 @@ mod ui;
 mod wireguard;
 
 use api::ProtonClient;
-use app::{App, InputMode, SplitFocus};
+use app::{App, ConfigTarget, InputMode, SplitFocus};
 use auth::ProtonAuth;
 use login::{run_login, show_authenticating, show_error, show_loading, LoginResult};
 use tokens::{load_tokens, save_tokens, StoredTokens};
@@ -145,7 +145,9 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
         KeyCode::Char('s') => {
             if app.split_view {
                 if let Some(server_idx) = app.get_selected_server_idx_in_split() {
-                    let _ = app.create_config(server_idx).await;
+                    let _ = app
+                        .create_config(server_idx, ConfigTarget::Saved)
+                        .await;
                 }
             } else {
                 app.save_selected_config().await;
@@ -232,7 +234,9 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
             if app.split_view {
                 if app.split_focus == SplitFocus::Servers {
                     if let Some(server_idx) = app.get_selected_server_idx_in_split() {
-                        if let Some(config_path) = app.create_config(server_idx).await {
+                        if let Some(config_path) =
+                            app.create_config(server_idx, ConfigTarget::Runtime).await
+                        {
                             if let Some(server) = app.all_servers.get(server_idx) {
                                 app.start_wireguard(
                                     config_path.to_str().unwrap_or("wg0.conf"),
