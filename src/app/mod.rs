@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use crate::api::ProtonClient;
+use crate::config::AppConfig;
 use crate::countries;
 use crate::models::LogicalServer;
 
@@ -93,6 +94,10 @@ impl App {
         let total_servers = servers.len();
         let unique_entry_ips = entry_ips.len();
 
+        let (group_by_entry_ip, split_view) = AppConfig::load()
+            .map(|c| (c.group_by_entry_ip, c.split_view))
+            .unwrap_or((true, false));
+
         let mut app = App {
             all_servers: servers,
             sorted_server_indices: sorted_indices,
@@ -107,7 +112,7 @@ impl App {
             search_cursor_position: 0,
             expanded_countries: HashSet::new(),
             expanded_entry_ips: HashSet::new(),
-            group_by_entry_ip: true,
+            group_by_entry_ip,
             server_counts: counts,
             should_redraw: false,
             connection_status: None,
@@ -115,7 +120,7 @@ impl App {
             show_help_popup: false,
             current_config_id: None,
             // Split view state
-            split_view: false,
+            split_view,
             split_focus: SplitFocus::Countries,
             full_country_list: country_list.clone(),
             country_list,

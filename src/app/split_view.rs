@@ -1,9 +1,16 @@
 use super::{App, DisplayItem, SplitFocus};
+use crate::config::AppConfig;
 use crate::countries;
 
 impl App {
     pub fn toggle_split_view(&mut self) {
         self.split_view = !self.split_view;
+
+        if let Ok(mut config) = AppConfig::load() {
+            config.split_view = self.split_view;
+            let _ = config.save();
+        }
+
         if self.split_view {
             // Entering split view - apply current search state
             if !self.search_query.is_empty() {

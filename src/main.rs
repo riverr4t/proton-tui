@@ -13,6 +13,7 @@ use std::{io, time::Duration};
 mod api;
 mod app;
 mod auth;
+mod config;
 mod countries;
 mod login;
 mod models;
