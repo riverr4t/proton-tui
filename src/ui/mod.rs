@@ -677,116 +677,173 @@ fn render_connection_popup(frame: &mut Frame, app: &App) {
 }
 
 fn render_help_popup(frame: &mut Frame) {
-    let block = Block::default()
-        .title(" Help - Keybindings ")
-        .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
+    // Color palette
+    let bg_color = Color::Rgb(22, 22, 30);
+    let border_color = Color::Rgb(88, 91, 112);
+    let accent_color = Color::Rgb(137, 180, 250);
+    let key_fg = Color::Rgb(249, 226, 175);
+    let key_bg = Color::Rgb(49, 50, 68);
+    let desc_color = Color::Rgb(205, 214, 244);
+    let section_color = Color::Rgb(166, 227, 161);
+    let divider_color = Color::Rgb(69, 71, 90);
+    let footer_bg = Color::Rgb(49, 50, 68);
+    let footer_text = Color::Rgb(186, 194, 222);
 
-    let area = centered_rect(65, 75, frame.size());
+    // Fixed column widths for table-like alignment
+    const KEY_WIDTH: usize = 10;
+    const DESC_WIDTH: usize = 18;
+    const LEFT_PAD: usize = 5;
+    const COL_GAP: usize = 2;
+
+    // Calculate content width: pad + key + space + desc + gap + key + space + desc + pad
+    let content_width =
+        LEFT_PAD + KEY_WIDTH + 1 + DESC_WIDTH + COL_GAP + KEY_WIDTH + 1 + DESC_WIDTH + LEFT_PAD;
+    // Add borders (2) and margin (2)
+    let popup_width = (content_width + 4) as u16;
+
+    let block = Block::default()
+        .title(" 󰋖  Keyboard Shortcuts ")
+        .title_style(
+            Style::default()
+                .fg(accent_color)
+                .add_modifier(Modifier::BOLD),
+        )
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(bg_color));
+
+    // Center the popup with fixed width
+    let frame_size = frame.size();
+    let popup_width = popup_width.min(frame_size.width);
+    let popup_height = (frame_size.height * 85 / 100).min(frame_size.height);
+    let x = (frame_size.width.saturating_sub(popup_width)) / 2;
+    let y = (frame_size.height.saturating_sub(popup_height)) / 2;
+    let area = Rect::new(x, y, popup_width, popup_height);
 
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
 
     let inner_area = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0)].as_ref())
+        .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
         .margin(1)
-        .split(area)[0];
+        .split(area);
 
-    let key_style = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(Color::White);
+    let content_area = inner_area[0];
+    let footer_area = inner_area[1];
+
+    // Styles
     let section_style = Style::default()
-        .fg(Color::Cyan)
+        .fg(section_color)
         .add_modifier(Modifier::BOLD);
+    let key_style = Style::default()
+        .fg(key_fg)
+        .bg(key_bg)
+        .add_modifier(Modifier::BOLD);
+    let desc_style = Style::default().fg(desc_color);
+    let divider_style = Style::default().fg(divider_color);
+
+    let left_pad = " ".repeat(LEFT_PAD);
+    let col_gap = " ".repeat(COL_GAP);
+
+    // Helper to create a formatted key with background color, padded to fixed width
+    let fmt_key = |key: &str| -> Span {
+        Span::styled(
+            format!(" {:^width$} ", key, width = KEY_WIDTH - 2),
+            key_style,
+        )
+    };
+
+    // Helper to create description padded to fixed width
+    let fmt_desc = |desc: &str| -> Span {
+        Span::styled(format!("{:<width$}", desc, width = DESC_WIDTH), desc_style)
+    };
+
+    // Helper to create a two-column row with consistent alignment
+    let make_row = |key1: &str, desc1: &str, key2: &str, desc2: &str| -> Line {
+        Line::from(vec![
+            Span::raw(left_pad.clone()),
+            fmt_key(key1),
+            Span::raw(" "),
+            fmt_desc(desc1),
+            Span::raw(col_gap.clone()),
+            fmt_key(key2),
+            Span::raw(" "),
+            fmt_desc(desc2),
+        ])
+    };
+
+    // Divider width = content width minus left/right padding
+    let divider_width = KEY_WIDTH + 1 + DESC_WIDTH + COL_GAP + KEY_WIDTH + 1 + DESC_WIDTH;
+    let divider = "─".repeat(divider_width);
 
     let help_text = vec![
-        Line::from(Span::styled("-- Navigation --", section_style)),
+        // Navigation Section
         Line::from(vec![
-            Span::styled("  Up/k       ", key_style),
-            Span::styled("Move up", desc_style),
-            Span::styled("            ", desc_style),
-            Span::styled("  Down/j    ", key_style),
-            Span::styled("Move down", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Home/g     ", key_style),
-            Span::styled("First item", desc_style),
-            Span::styled("         ", desc_style),
-            Span::styled("  End/G     ", key_style),
-            Span::styled("Last item", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  PgUp/Ctrl-u ", key_style),
-            Span::styled("Page up", desc_style),
-            Span::styled("         ", desc_style),
-            Span::styled("  PgDn/Ctrl-d ", key_style),
-            Span::styled("Page down", desc_style),
+            Span::raw(left_pad.clone()),
+            Span::styled("  Navigation", section_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled("-- Tree View --", section_style)),
-        Line::from(vec![
-            Span::styled("  Right/l    ", key_style),
-            Span::styled("Expand country", desc_style),
-            Span::styled("     ", desc_style),
-            Span::styled("  Left/h    ", key_style),
-            Span::styled("Collapse country", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Space      ", key_style),
-            Span::styled("Toggle expand", desc_style),
-            Span::styled("      ", desc_style),
-            Span::styled("  Enter     ", key_style),
-            Span::styled("Connect/Toggle", desc_style),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("-- Split View --", section_style)),
-        Line::from(vec![
-            Span::styled("  v          ", key_style),
-            Span::styled("Toggle split view", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tab        ", key_style),
-            Span::styled("Switch pane (countries/servers)", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  Left/Right ", key_style),
-            Span::styled("Switch pane", desc_style),
-            Span::styled("        ", desc_style),
-            Span::styled("  Enter     ", key_style),
-            Span::styled("Connect to server", desc_style),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("-- Actions --", section_style)),
-        Line::from(vec![
-            Span::styled("  /          ", key_style),
-            Span::styled("Search servers", desc_style),
-            Span::styled("     ", desc_style),
-            Span::styled("  s         ", key_style),
-            Span::styled("Save WireGuard config", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  i          ", key_style),
-            Span::styled("Toggle IP grouping", desc_style),
-            Span::styled(" ", desc_style),
-            Span::styled("  d         ", key_style),
-            Span::styled("Disconnect VPN", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled("  ?          ", key_style),
-            Span::styled("Show this help", desc_style),
-            Span::styled("     ", desc_style),
-            Span::styled("  q         ", key_style),
-            Span::styled("Quit", desc_style),
-        ]),
+        make_row("↑ / k", "Move up", "↓ / j", "Move down"),
+        make_row("Home / g", "Go to first", "End / G", "Go to last"),
+        make_row("PgUp", "Page up", "PgDn", "Page down"),
+        make_row("Ctrl-u", "Half page up", "Ctrl-d", "Half page down"),
         Line::from(""),
         Line::from(Span::styled(
-            "Press any key to close",
-            Style::default().fg(Color::DarkGray),
+            format!("{}{}", left_pad, divider),
+            divider_style,
         )),
+        Line::from(""),
+        // Tree View Section
+        Line::from(vec![
+            Span::raw(left_pad.clone()),
+            Span::styled("  Tree View", section_style),
+        ]),
+        Line::from(""),
+        make_row("→ / l", "Expand node", "← / h", "Collapse node"),
+        make_row("Space", "Toggle expand", "Enter", "Connect/Toggle"),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{}{}", left_pad, divider),
+            divider_style,
+        )),
+        Line::from(""),
+        // Split View Section
+        Line::from(vec![
+            Span::raw(left_pad.clone()),
+            Span::styled("  Split View", section_style),
+        ]),
+        Line::from(""),
+        make_row("v", "Toggle split", "Tab", "Switch pane"),
+        make_row("← / →", "Switch pane", "Enter", "Connect server"),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("{}{}", left_pad, divider),
+            divider_style,
+        )),
+        Line::from(""),
+        // Actions Section
+        Line::from(vec![
+            Span::raw(left_pad.clone()),
+            Span::styled("  Actions", section_style),
+        ]),
+        Line::from(""),
+        make_row("/", "Search servers", "s", "Save config"),
+        make_row("i", "Toggle IP group", "d", "Disconnect VPN"),
+        make_row("?", "Show this help", "q", "Quit application"),
     ];
 
     let paragraph = Paragraph::new(help_text);
-    frame.render_widget(paragraph, inner_area);
+    frame.render_widget(paragraph, content_area);
+
+    // Footer with close instruction - centered with empty line before
+    let footer = Paragraph::new(vec![
+        Line::from(""),
+        Line::from(vec![Span::styled(
+            " Press any key to close ",
+            Style::default().fg(footer_text).bg(footer_bg),
+        )]),
+    ])
+    .alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(footer, footer_area);
 }
