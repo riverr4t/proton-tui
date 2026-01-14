@@ -17,6 +17,7 @@ impl App {
                     if let Some(item) = self.displayed_items.get(idx) {
                         let country_code = match item {
                             DisplayItem::CountryHeader(c) => c.clone(),
+                            DisplayItem::ExitIpHeader(c, _) => c.clone(),
                             DisplayItem::Server(server_idx) => {
                                 self.all_servers[*server_idx].exit_country.clone()
                             }
@@ -43,22 +44,68 @@ impl App {
         }
     }
 
+    fn get_exit_ip_for_idx(&self, idx: usize) -> String {
+        self.all_servers[idx]
+            .servers
+            .first()
+            .map(|s| s.exit_ip.clone())
+            .unwrap_or_default()
+    }
+
     pub fn update_server_list_for_selected_country(&mut self) {
-        self.server_list.clear();
+        self.split_server_items.clear();
         if let Some(idx) = self.country_state.selected() {
             if let Some(country_code) = self.country_list.get(idx) {
-                for (i, server) in self.all_servers.iter().enumerate() {
-                    if &server.exit_country == country_code {
-                        self.server_list.push(i);
+                // Collect server indices for this country
+                let mut server_indices: Vec<usize> = self
+                    .all_servers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| &s.exit_country == country_code)
+                    .map(|(i, _)| i)
+                    .collect();
+
+                // Sort by exit IP then name for consistent grouping
+                server_indices.sort_by(|&a, &b| {
+                    let ip_a = self.get_exit_ip_for_idx(a);
+                    let ip_b = self.get_exit_ip_for_idx(b);
+                    ip_a.cmp(&ip_b)
+                        .then(self.all_servers[a].name.cmp(&self.all_servers[b].name))
+                });
+
+                if self.group_by_exit_ip {
+                    let mut current_exit_ip = String::new();
+                    for i in server_indices {
+                        let exit_ip = self.get_exit_ip_for_idx(i);
+                        if exit_ip != current_exit_ip {
+                            current_exit_ip = exit_ip.clone();
+                            self.split_server_items.push(DisplayItem::ExitIpHeader(
+                                country_code.clone(),
+                                current_exit_ip.clone(),
+                            ));
+                        }
+                        self.split_server_items.push(DisplayItem::Server(i));
+                    }
+                } else {
+                    for i in server_indices {
+                        self.split_server_items.push(DisplayItem::Server(i));
                     }
                 }
-                if !self.server_list.is_empty() {
-                    self.server_state.select(Some(0));
-                } else {
-                    self.server_state.select(None);
-                }
+
+                // Select first server (skip headers)
+                self.select_first_server_in_split();
             }
         }
+    }
+
+    fn select_first_server_in_split(&mut self) {
+        for (i, item) in self.split_server_items.iter().enumerate() {
+            if matches!(item, DisplayItem::Server(_)) {
+                self.server_state.select(Some(i));
+                return;
+            }
+        }
+        self.server_state.select(None);
     }
 
     pub fn update_split_view_for_search(&mut self) {
@@ -79,16 +126,37 @@ impl App {
         // 1. Find ALL matching servers with scores (regardless of country)
         let mut scored_servers = self.collect_scored_servers(query);
 
-        // Sort by score (lower is better), then by server name
+        // Sort by score (lower is better), then by exit IP, then by server name
         scored_servers.sort_by(|a, b| {
             let score_cmp = a.1.cmp(&b.1);
             if score_cmp != std::cmp::Ordering::Equal {
                 return score_cmp;
             }
-            self.all_servers[a.0].name.cmp(&self.all_servers[b.0].name)
+            let ip_a = self.get_exit_ip_for_idx(a.0);
+            let ip_b = self.get_exit_ip_for_idx(b.0);
+            ip_a.cmp(&ip_b)
+                .then(self.all_servers[a.0].name.cmp(&self.all_servers[b.0].name))
         });
 
-        self.server_list = scored_servers.into_iter().map(|(idx, _)| idx).collect();
+        // Build split_server_items with optional IP grouping
+        self.split_server_items.clear();
+        if self.group_by_exit_ip {
+            let mut current_exit_ip = String::new();
+            for (idx, _) in scored_servers {
+                let exit_ip = self.get_exit_ip_for_idx(idx);
+                let country = self.all_servers[idx].exit_country.clone();
+                if exit_ip != current_exit_ip {
+                    current_exit_ip = exit_ip.clone();
+                    self.split_server_items
+                        .push(DisplayItem::ExitIpHeader(country, current_exit_ip.clone()));
+                }
+                self.split_server_items.push(DisplayItem::Server(idx));
+            }
+        } else {
+            for (idx, _) in scored_servers {
+                self.split_server_items.push(DisplayItem::Server(idx));
+            }
+        }
 
         // 2. Filter and sort country list by best match score
         let mut scored_countries = self.collect_scored_countries(query);
@@ -104,16 +172,42 @@ impl App {
         self.country_list = scored_countries.into_iter().map(|(code, _)| code).collect();
 
         // 3. Reset selections
-        if !self.server_list.is_empty() {
-            self.server_state.select(Some(0));
-        } else {
-            self.server_state.select(None);
-        }
+        self.select_first_server_in_split();
         if !self.country_list.is_empty() {
             self.country_state.select(Some(0));
         } else {
             self.country_state.select(None);
         }
+    }
+
+    fn find_next_server_index(&self, from: usize, forward: bool) -> Option<usize> {
+        let len = self.split_server_items.len();
+        if len == 0 {
+            return None;
+        }
+
+        let mut idx = from;
+        for _ in 0..len {
+            idx = if forward {
+                if idx >= len - 1 {
+                    0
+                } else {
+                    idx + 1
+                }
+            } else if idx == 0 {
+                len - 1
+            } else {
+                idx - 1
+            };
+
+            if matches!(
+                self.split_server_items.get(idx),
+                Some(DisplayItem::Server(_))
+            ) {
+                return Some(idx);
+            }
+        }
+        None
     }
 
     pub fn split_next(&mut self) {
@@ -137,21 +231,11 @@ impl App {
                 self.update_server_list_for_selected_country();
             }
             SplitFocus::Servers => {
-                let len = self.server_list.len();
-                if len == 0 {
-                    return;
-                }
-                let i = match self.server_state.selected() {
-                    Some(i) => {
-                        if i >= len - 1 {
-                            0
-                        } else {
-                            i + 1
-                        }
+                if let Some(current) = self.server_state.selected() {
+                    if let Some(next) = self.find_next_server_index(current, true) {
+                        self.server_state.select(Some(next));
                     }
-                    None => 0,
-                };
-                self.server_state.select(Some(i));
+                }
             }
         }
     }
@@ -177,21 +261,11 @@ impl App {
                 self.update_server_list_for_selected_country();
             }
             SplitFocus::Servers => {
-                let len = self.server_list.len();
-                if len == 0 {
-                    return;
-                }
-                let i = match self.server_state.selected() {
-                    Some(i) => {
-                        if i == 0 {
-                            len - 1
-                        } else {
-                            i - 1
-                        }
+                if let Some(current) = self.server_state.selected() {
+                    if let Some(prev) = self.find_next_server_index(current, false) {
+                        self.server_state.select(Some(prev));
                     }
-                    None => 0,
-                };
-                self.server_state.select(Some(i));
+                }
             }
         }
     }
@@ -211,15 +285,28 @@ impl App {
                 self.update_server_list_for_selected_country();
             }
             SplitFocus::Servers => {
-                let len = self.server_list.len();
+                let len = self.split_server_items.len();
                 if len == 0 {
                     return;
                 }
-                let i = match self.server_state.selected() {
+                let target = match self.server_state.selected() {
                     Some(i) => std::cmp::min(i + 10, len - 1),
                     None => 0,
                 };
-                self.server_state.select(Some(i));
+                // Find nearest server at or after target
+                for i in target..len {
+                    if matches!(self.split_server_items.get(i), Some(DisplayItem::Server(_))) {
+                        self.server_state.select(Some(i));
+                        return;
+                    }
+                }
+                // If none found, select last server
+                for i in (0..target).rev() {
+                    if matches!(self.split_server_items.get(i), Some(DisplayItem::Server(_))) {
+                        self.server_state.select(Some(i));
+                        return;
+                    }
+                }
             }
         }
     }
@@ -239,15 +326,24 @@ impl App {
                 self.update_server_list_for_selected_country();
             }
             SplitFocus::Servers => {
-                let len = self.server_list.len();
+                let len = self.split_server_items.len();
                 if len == 0 {
                     return;
                 }
-                let i = match self.server_state.selected() {
-                    Some(i) => i.saturating_sub(10),
-                    None => 0,
-                };
-                self.server_state.select(Some(i));
+                let target = self
+                    .server_state
+                    .selected()
+                    .map(|i| i.saturating_sub(10))
+                    .unwrap_or(0);
+                // Find nearest server at or before target
+                for i in (0..=target).rev() {
+                    if matches!(self.split_server_items.get(i), Some(DisplayItem::Server(_))) {
+                        self.server_state.select(Some(i));
+                        return;
+                    }
+                }
+                // If none found, select first server
+                self.select_first_server_in_split();
             }
         }
     }
@@ -261,9 +357,7 @@ impl App {
                 }
             }
             SplitFocus::Servers => {
-                if !self.server_list.is_empty() {
-                    self.server_state.select(Some(0));
-                }
+                self.select_first_server_in_split();
             }
         }
     }
@@ -277,8 +371,12 @@ impl App {
                 }
             }
             SplitFocus::Servers => {
-                if !self.server_list.is_empty() {
-                    self.server_state.select(Some(self.server_list.len() - 1));
+                // Find last server
+                for i in (0..self.split_server_items.len()).rev() {
+                    if matches!(self.split_server_items.get(i), Some(DisplayItem::Server(_))) {
+                        self.server_state.select(Some(i));
+                        return;
+                    }
                 }
             }
         }
@@ -293,9 +391,10 @@ impl App {
 
     pub fn get_selected_server_idx_in_split(&self) -> Option<usize> {
         if let Some(idx) = self.server_state.selected() {
-            self.server_list.get(idx).copied()
-        } else {
-            None
+            if let Some(DisplayItem::Server(server_idx)) = self.split_server_items.get(idx) {
+                return Some(*server_idx);
+            }
         }
+        None
     }
 }

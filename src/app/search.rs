@@ -106,6 +106,14 @@ impl App {
             .collect()
     }
 
+    fn get_exit_ip(&self, server_idx: usize) -> String {
+        self.all_servers[server_idx]
+            .servers
+            .first()
+            .map(|s| s.exit_ip.clone())
+            .unwrap_or_default()
+    }
+
     pub fn update_display_list(&mut self) {
         self.displayed_items.clear();
         let query = &self.search_query;
@@ -114,13 +122,13 @@ impl App {
         if is_searching {
             let mut scored_servers = self.collect_scored_servers(query);
 
-            // Sort by score (lower is better), then by country name, then by server name
+            // Sort by score (lower is better), then by country name, then by exit IP, then by server name
             scored_servers.sort_by(|a, b| {
                 let score_cmp = a.1.cmp(&b.1);
                 if score_cmp != std::cmp::Ordering::Equal {
                     return score_cmp;
                 }
-                // Same score: sort by country, then server name
+                // Same score: sort by country, then exit IP, then server name
                 let server_a = &self.all_servers[a.0];
                 let server_b = &self.all_servers[b.0];
                 let country_cmp = countries::get_country_name(&server_a.exit_country)
@@ -128,38 +136,71 @@ impl App {
                 if country_cmp != std::cmp::Ordering::Equal {
                     return country_cmp;
                 }
+                let exit_ip_a = self.get_exit_ip(a.0);
+                let exit_ip_b = self.get_exit_ip(b.0);
+                let exit_ip_cmp = exit_ip_a.cmp(&exit_ip_b);
+                if exit_ip_cmp != std::cmp::Ordering::Equal {
+                    return exit_ip_cmp;
+                }
                 server_a.name.cmp(&server_b.name)
             });
 
-            // Build display list, grouping by country
+            // Build display list, grouping by country (and optionally by exit IP)
             let mut current_country = String::new();
+            let mut current_exit_ip = String::new();
             for (server_idx, _score) in scored_servers {
                 let server = &self.all_servers[server_idx];
+                let exit_ip = self.get_exit_ip(server_idx);
+
                 if server.exit_country != current_country {
                     current_country = server.exit_country.clone();
+                    current_exit_ip = String::new();
                     self.displayed_items
                         .push(DisplayItem::CountryHeader(current_country.clone()));
+                }
+                if self.group_by_exit_ip && exit_ip != current_exit_ip {
+                    current_exit_ip = exit_ip.clone();
+                    self.displayed_items.push(DisplayItem::ExitIpHeader(
+                        current_country.clone(),
+                        current_exit_ip.clone(),
+                    ));
                 }
                 self.displayed_items.push(DisplayItem::Server(server_idx));
             }
         } else {
-            // Normal mode: show all countries, expand selected ones
+            // Normal mode: use pre-sorted indices for fast expand/collapse
             let mut current_country = String::new();
-            let mut country_header_pushed = false;
+            let mut current_exit_ip = String::new();
 
-            for (i, server) in self.all_servers.iter().enumerate() {
+            for &i in &self.sorted_server_indices {
+                let server = &self.all_servers[i];
+                let exit_ip = self.get_exit_ip(i);
+
                 if server.exit_country != current_country {
                     current_country = server.exit_country.clone();
-                    country_header_pushed = false;
-                }
-
-                if !country_header_pushed {
+                    current_exit_ip = String::new();
                     self.displayed_items
                         .push(DisplayItem::CountryHeader(current_country.clone()));
-                    country_header_pushed = true;
                 }
+
                 if self.expanded_countries.contains(&current_country) {
-                    self.displayed_items.push(DisplayItem::Server(i));
+                    if self.group_by_exit_ip {
+                        // Group by exit IP: show IP headers and require expansion
+                        if exit_ip != current_exit_ip {
+                            current_exit_ip = exit_ip.clone();
+                            self.displayed_items.push(DisplayItem::ExitIpHeader(
+                                current_country.clone(),
+                                current_exit_ip.clone(),
+                            ));
+                        }
+                        let exit_ip_key = (current_country.clone(), current_exit_ip.clone());
+                        if self.expanded_exit_ips.contains(&exit_ip_key) {
+                            self.displayed_items.push(DisplayItem::Server(i));
+                        }
+                    } else {
+                        // Flat mode: show servers directly under country
+                        self.displayed_items.push(DisplayItem::Server(i));
+                    }
                 }
             }
         }

@@ -78,6 +78,15 @@ impl App {
                         }
                         self.update_display_list();
                     }
+                    DisplayItem::ExitIpHeader(country, exit_ip) => {
+                        let key = (country, exit_ip);
+                        if self.expanded_exit_ips.contains(&key) {
+                            self.expanded_exit_ips.remove(&key);
+                        } else {
+                            self.expanded_exit_ips.insert(key);
+                        }
+                        self.update_display_list();
+                    }
                     DisplayItem::Server(_) => {
                         // handled by connect_to_selected usually
                     }
@@ -88,12 +97,22 @@ impl App {
 
     pub fn expand_selected(&mut self) {
         if let Some(idx) = self.state.selected() {
-            if let Some(DisplayItem::CountryHeader(country)) =
-                self.displayed_items.get(idx).cloned()
-            {
-                if !self.expanded_countries.contains(&country) {
-                    self.expanded_countries.insert(country);
-                    self.update_display_list();
+            if let Some(item) = self.displayed_items.get(idx).cloned() {
+                match item {
+                    DisplayItem::CountryHeader(country) => {
+                        if !self.expanded_countries.contains(&country) {
+                            self.expanded_countries.insert(country);
+                            self.update_display_list();
+                        }
+                    }
+                    DisplayItem::ExitIpHeader(country, exit_ip) => {
+                        let key = (country, exit_ip);
+                        if !self.expanded_exit_ips.contains(&key) {
+                            self.expanded_exit_ips.insert(key);
+                            self.update_display_list();
+                        }
+                    }
+                    DisplayItem::Server(_) => {}
                 }
             }
         }
@@ -109,19 +128,46 @@ impl App {
                             self.update_display_list();
                         }
                     }
+                    DisplayItem::ExitIpHeader(country, exit_ip) => {
+                        let key = (country.clone(), exit_ip);
+                        if self.expanded_exit_ips.contains(&key) {
+                            self.expanded_exit_ips.remove(&key);
+                            self.update_display_list();
+                        } else {
+                            // Already collapsed, collapse parent country
+                            if self.expanded_countries.contains(&country) {
+                                self.expanded_countries.remove(&country);
+                                self.update_display_list();
+
+                                // Find the country header and select it
+                                if let Some(header_pos) =
+                                    self.displayed_items.iter().position(|it| {
+                                        matches!(it, DisplayItem::CountryHeader(c) if c == &country)
+                                    })
+                                {
+                                    self.state.select(Some(header_pos));
+                                }
+                            }
+                        }
+                    }
                     DisplayItem::Server(server_idx) => {
-                        let country = self.all_servers[server_idx].exit_country.clone();
-                        if self.expanded_countries.contains(&country) {
-                            self.expanded_countries.remove(&country);
+                        let server = &self.all_servers[server_idx];
+                        let country = server.exit_country.clone();
+                        let exit_ip = server
+                            .servers
+                            .first()
+                            .map(|s| s.exit_ip.clone())
+                            .unwrap_or_default();
+                        let key = (country.clone(), exit_ip.clone());
+
+                        if self.expanded_exit_ips.contains(&key) {
+                            // Collapse the exit IP group
+                            self.expanded_exit_ips.remove(&key);
                             self.update_display_list();
 
-                            // Find the header index and select it
+                            // Find the exit IP header and select it
                             if let Some(header_pos) = self.displayed_items.iter().position(|it| {
-                                if let DisplayItem::CountryHeader(c) = it {
-                                    c == &country
-                                } else {
-                                    false
-                                }
+                                matches!(it, DisplayItem::ExitIpHeader(c, ip) if c == &country && ip == &exit_ip)
                             }) {
                                 self.state.select(Some(header_pos));
                             }

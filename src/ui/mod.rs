@@ -80,10 +80,13 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
             .add_modifier(Modifier::BOLD),
     };
 
-    // Count matching servers (exclude country headers)
+    // Count matching servers (exclude country headers and IP headers)
     let match_count: usize = if !app.search_query.is_empty() {
         if app.split_view {
-            app.server_list.len()
+            app.split_server_items
+                .iter()
+                .filter(|item| matches!(item, DisplayItem::Server(_)))
+                .count()
         } else {
             app.displayed_items
                 .iter()
@@ -165,6 +168,40 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled(format!("[{}]", count), Style::default().fg(Color::DarkGray)),
                 ]))
             }
+            DisplayItem::ExitIpHeader(country_code, exit_ip) => {
+                let key = (country_code.clone(), exit_ip.clone());
+                let is_expanded = app.expanded_exit_ips.contains(&key);
+
+                // Count servers with this exit IP in this country
+                let server_count = app
+                    .all_servers
+                    .iter()
+                    .filter(|s| {
+                        &s.exit_country == country_code
+                            && s.servers.first().map(|i| &i.exit_ip) == Some(exit_ip)
+                    })
+                    .count();
+
+                let (icon, style) = if is_expanded {
+                    (
+                        "▼",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("▶", Style::default().fg(Color::DarkGray))
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("   {} ", icon), style),
+                    Span::styled(format!("{} ", exit_ip), style),
+                    Span::styled(
+                        format!("[{}]", server_count),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+            }
             DisplayItem::Server(idx) => {
                 let s = &app.all_servers[*idx];
                 let load_color = if s.load < 30 {
@@ -178,7 +215,7 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 let load_str = format!("{:>3}%", s.load);
 
                 ListItem::new(Line::from(vec![
-                    Span::styled("   ╰─ ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("      ╰─ ", Style::default().fg(Color::DarkGray)),
                     Span::styled(format!("{:<10}", s.name), Style::default().fg(Color::White)),
                     Span::styled(
                         format!(" {:<15} ", s.city),
@@ -301,12 +338,13 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Get selected country name for title with counts
+    let server_count = app
+        .split_server_items
+        .iter()
+        .filter(|item| matches!(item, DisplayItem::Server(_)))
+        .count();
     let selected_country_name = if is_searching {
-        format!(
-            "Servers ({}/{})",
-            app.server_list.len(),
-            app.all_servers.len()
-        )
+        format!("Servers ({}/{})", server_count, app.all_servers.len())
     } else {
         app.country_state
             .selected()
@@ -315,7 +353,7 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 format!(
                     "Servers - {} ({}/{})",
                     countries::get_country_name(code),
-                    app.server_list.len(),
+                    server_count,
                     app.all_servers.len()
                 )
             })
@@ -325,7 +363,7 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
     let server_list_title =
         add_connected_badge(&selected_country_name, app.connection_status.is_some());
 
-    if is_searching && app.server_list.is_empty() {
+    if is_searching && app.split_server_items.is_empty() {
         render_empty_list(
             frame,
             split_chunks[1],
@@ -334,34 +372,45 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
         );
     } else {
         let server_items: Vec<ListItem> = app
-            .server_list
+            .split_server_items
             .iter()
-            .map(|&idx| {
-                let s = &app.all_servers[idx];
-                let load_color = if s.load < 30 {
-                    Color::Green
-                } else if s.load < 70 {
-                    Color::Yellow
-                } else {
-                    Color::Red
-                };
-
-                let load_str = format!("{:>3}%", s.load);
-
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        format!(" {:<12}", s.name),
-                        Style::default().fg(Color::White),
-                    ),
-                    Span::styled(format!("{:<15}", s.city), Style::default().fg(Color::Gray)),
-                    Span::styled(load_str.to_string(), Style::default().fg(load_color)),
-                    Span::styled(
-                        format!("  {}", App::format_features(s.features)),
+            .map(|item| match item {
+                DisplayItem::ExitIpHeader(_, exit_ip) => {
+                    ListItem::new(Line::from(vec![Span::styled(
+                        format!(" {} ", exit_ip),
                         Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ]))
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )]))
+                }
+                DisplayItem::Server(idx) => {
+                    let s = &app.all_servers[*idx];
+                    let load_color = if s.load < 30 {
+                        Color::Green
+                    } else if s.load < 70 {
+                        Color::Yellow
+                    } else {
+                        Color::Red
+                    };
+
+                    let load_str = format!("{:>3}%", s.load);
+
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!(" {:<12}", s.name),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::styled(format!("{:<15}", s.city), Style::default().fg(Color::Gray)),
+                        Span::styled(load_str.to_string(), Style::default().fg(load_color)),
+                        Span::styled(
+                            format!("  {}", App::format_features(s.features)),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
+                        ),
+                    ]))
+                }
+                DisplayItem::CountryHeader(_) => ListItem::new(Line::from("")),
             })
             .collect();
 
@@ -392,16 +441,30 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let stats = format!(
+        "Servers: {} | Entry IPs: {} | Exit IPs: {}",
+        app.total_servers, app.unique_entry_ips, app.unique_exit_ips
+    );
+
     let footer_text = if let Some(status) = &app.connection_status {
         let duration = status.connected_at.elapsed();
         let secs = duration.as_secs();
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
         let s = secs % 60;
-        format!(
-            " Connected: {} | Uptime {:02}:{:02}:{:02} | Press d to disconnect | {} ",
-            status.server_name, h, m, s, app.status_message
-        )
+        if app.status_message.is_empty() {
+            format!(
+                " Connected: {} | Uptime {:02}:{:02}:{:02} | {} ",
+                status.server_name, h, m, s, stats
+            )
+        } else {
+            format!(
+                " Connected: {} | Uptime {:02}:{:02}:{:02} | {} ",
+                status.server_name, h, m, s, app.status_message
+            )
+        }
+    } else if app.status_message.is_empty() {
+        format!(" {} ", stats)
     } else {
         format!(" {} ", app.status_message)
     };
@@ -433,15 +496,23 @@ fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Del Word ", desc_style),
         ])
     } else if app.split_view {
+        let ip_group_label = if app.group_by_exit_ip {
+            " IP:On "
+        } else {
+            " IP:Off "
+        };
         Line::from(vec![
             Span::styled(" / ", key_style),
             Span::styled(" Search ", desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" Tab ", key_style),
-            Span::styled(" Switch Pane ", desc_style),
+            Span::styled(" Switch ", desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" Enter ", key_style),
             Span::styled(" Connect ", desc_style),
+            Span::styled(" | ", sep_style),
+            Span::styled(" i ", key_style),
+            Span::styled(ip_group_label, desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" s ", key_style),
             Span::styled(" Save ", desc_style),
@@ -453,6 +524,11 @@ fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" Quit ", desc_style),
         ])
     } else {
+        let ip_group_label = if app.group_by_exit_ip {
+            " IP:On "
+        } else {
+            " IP:Off "
+        };
         Line::from(vec![
             Span::styled(" / ", key_style),
             Span::styled(" Search ", desc_style),
@@ -462,6 +538,9 @@ fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(" | ", sep_style),
             Span::styled(" s ", key_style),
             Span::styled(" Save ", desc_style),
+            Span::styled(" | ", sep_style),
+            Span::styled(" i ", key_style),
+            Span::styled(ip_group_label, desc_style),
             Span::styled(" | ", sep_style),
             Span::styled(" v ", key_style),
             Span::styled(" Split View ", desc_style),
@@ -608,72 +687,79 @@ fn render_help_popup(frame: &mut Frame) {
     let help_text = vec![
         Line::from(Span::styled("-- Navigation --", section_style)),
         Line::from(vec![
-            Span::styled("  Up/k      ", key_style),
+            Span::styled("  Up/k       ", key_style),
             Span::styled("Move up", desc_style),
-            Span::styled("          ", desc_style),
+            Span::styled("            ", desc_style),
             Span::styled("  Down/j    ", key_style),
             Span::styled("Move down", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  Home/g    ", key_style),
+            Span::styled("  Home/g     ", key_style),
             Span::styled("First item", desc_style),
-            Span::styled("        ", desc_style),
+            Span::styled("         ", desc_style),
             Span::styled("  End/G     ", key_style),
             Span::styled("Last item", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  PgUp      ", key_style),
+            Span::styled("  PgUp       ", key_style),
             Span::styled("Page up", desc_style),
-            Span::styled("           ", desc_style),
+            Span::styled("            ", desc_style),
             Span::styled("  PgDn      ", key_style),
             Span::styled("Page down", desc_style),
         ]),
         Line::from(""),
         Line::from(Span::styled("-- Tree View --", section_style)),
         Line::from(vec![
-            Span::styled("  Right/l   ", key_style),
+            Span::styled("  Right/l    ", key_style),
             Span::styled("Expand country", desc_style),
-            Span::styled("    ", desc_style),
+            Span::styled("     ", desc_style),
             Span::styled("  Left/h    ", key_style),
             Span::styled("Collapse country", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  Space     ", key_style),
+            Span::styled("  Space      ", key_style),
             Span::styled("Toggle expand", desc_style),
-            Span::styled("     ", desc_style),
+            Span::styled("      ", desc_style),
             Span::styled("  Enter     ", key_style),
             Span::styled("Connect/Toggle", desc_style),
         ]),
         Line::from(""),
         Line::from(Span::styled("-- Split View --", section_style)),
         Line::from(vec![
-            Span::styled("  v         ", key_style),
+            Span::styled("  v          ", key_style),
             Span::styled("Toggle split view", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  Tab       ", key_style),
+            Span::styled("  Tab        ", key_style),
             Span::styled("Switch pane (countries/servers)", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  Left/Right", key_style),
+            Span::styled("  Left/Right ", key_style),
             Span::styled("Switch pane", desc_style),
-            Span::styled("       ", desc_style),
+            Span::styled("        ", desc_style),
             Span::styled("  Enter     ", key_style),
             Span::styled("Connect to server", desc_style),
         ]),
         Line::from(""),
         Line::from(Span::styled("-- Actions --", section_style)),
         Line::from(vec![
-            Span::styled("  /         ", key_style),
+            Span::styled("  /          ", key_style),
             Span::styled("Search servers", desc_style),
-            Span::styled("    ", desc_style),
+            Span::styled("     ", desc_style),
             Span::styled("  s         ", key_style),
             Span::styled("Save WireGuard config", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  ?         ", key_style),
+            Span::styled("  i          ", key_style),
+            Span::styled("Toggle IP grouping", desc_style),
+            Span::styled(" ", desc_style),
+            Span::styled("  d         ", key_style),
+            Span::styled("Disconnect VPN", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  ?          ", key_style),
             Span::styled("Show this help", desc_style),
-            Span::styled("    ", desc_style),
+            Span::styled("     ", desc_style),
             Span::styled("  q         ", key_style),
             Span::styled("Quit", desc_style),
         ]),
