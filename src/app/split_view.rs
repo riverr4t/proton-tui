@@ -1,6 +1,5 @@
 use super::{App, DisplayItem, SplitFocus};
 use crate::config::AppConfig;
-use crate::countries;
 
 impl App {
     pub fn toggle_split_view(&mut self) {
@@ -51,12 +50,8 @@ impl App {
         }
     }
 
-    fn get_entry_ip_for_idx(&self, idx: usize) -> String {
-        self.all_servers[idx]
-            .servers
-            .first()
-            .map(|s| s.entry_ip.clone())
-            .unwrap_or_default()
+    fn get_entry_ip_for_idx(&self, idx: usize) -> &str {
+        &self.search_cache[idx].entry_ip
     }
 
     pub fn update_server_list_for_selected_country(&mut self) {
@@ -72,11 +67,11 @@ impl App {
                     .map(|(i, _)| i)
                     .collect();
 
-                // Sort by entry IP then name for consistent grouping
+                // Sort by entry IP then name for consistent grouping (using cached entry_ip)
                 server_indices.sort_by(|&a, &b| {
-                    let ip_a = self.get_entry_ip_for_idx(a);
-                    let ip_b = self.get_entry_ip_for_idx(b);
-                    ip_a.cmp(&ip_b)
+                    self.search_cache[a]
+                        .entry_ip
+                        .cmp(&self.search_cache[b].entry_ip)
                         .then(self.all_servers[a].name.cmp(&self.all_servers[b].name))
                 });
 
@@ -85,7 +80,7 @@ impl App {
                     for i in server_indices {
                         let entry_ip = self.get_entry_ip_for_idx(i);
                         if entry_ip != current_entry_ip {
-                            current_entry_ip = entry_ip.clone();
+                            current_entry_ip = entry_ip.to_string();
                             self.split_server_items.push(DisplayItem::EntryIpHeader(
                                 country_code.clone(),
                                 current_entry_ip.clone(),
@@ -134,14 +129,15 @@ impl App {
         let mut scored_servers = self.collect_scored_servers(query);
 
         // Sort by score (lower is better), then by entry IP, then by server name
+        // Using cached entry_ip to avoid repeated lookups
         scored_servers.sort_by(|a, b| {
             let score_cmp = a.1.cmp(&b.1);
             if score_cmp != std::cmp::Ordering::Equal {
                 return score_cmp;
             }
-            let ip_a = self.get_entry_ip_for_idx(a.0);
-            let ip_b = self.get_entry_ip_for_idx(b.0);
-            ip_a.cmp(&ip_b)
+            self.search_cache[a.0]
+                .entry_ip
+                .cmp(&self.search_cache[b.0].entry_ip)
                 .then(self.all_servers[a.0].name.cmp(&self.all_servers[b.0].name))
         });
 
@@ -153,7 +149,7 @@ impl App {
                 let entry_ip = self.get_entry_ip_for_idx(idx);
                 let country = self.all_servers[idx].exit_country.clone();
                 if entry_ip != current_entry_ip {
-                    current_entry_ip = entry_ip.clone();
+                    current_entry_ip = entry_ip.to_string();
                     self.split_server_items.push(DisplayItem::EntryIpHeader(
                         country,
                         current_entry_ip.clone(),
@@ -168,14 +164,30 @@ impl App {
         }
 
         // 2. Filter and sort country list by best match score
+        // Uses cached country names to avoid repeated lookups
         let mut scored_countries = self.collect_scored_countries(query);
+
+        // Build a map from code to cached name for sorting
+        let country_name_map: std::collections::HashMap<&str, &str> = self
+            .country_search_cache
+            .iter()
+            .map(|c| (c.code.as_str(), c.name.as_str()))
+            .collect();
 
         scored_countries.sort_by(|a, b| {
             let score_cmp = a.1.cmp(&b.1);
             if score_cmp != std::cmp::Ordering::Equal {
                 return score_cmp;
             }
-            countries::get_country_name(&a.0).cmp(&countries::get_country_name(&b.0))
+            let name_a = country_name_map
+                .get(a.0.as_str())
+                .copied()
+                .unwrap_or(a.0.as_str());
+            let name_b = country_name_map
+                .get(b.0.as_str())
+                .copied()
+                .unwrap_or(b.0.as_str());
+            name_a.cmp(name_b)
         });
 
         self.country_list = scored_countries.into_iter().map(|(code, _)| code).collect();

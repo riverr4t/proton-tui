@@ -5,6 +5,7 @@ mod split_view;
 mod state;
 
 pub use connection::ConfigTarget;
+pub use search::{CountrySearchCache, ServerSearchCache};
 pub use state::{ConnectionStatus, DisplayItem, InputMode, SplitFocus};
 
 use ratatui::widgets::ListState;
@@ -45,17 +46,12 @@ pub struct App {
     pub country_state: ListState,
     pub split_server_items: Vec<DisplayItem>,
     pub server_state: ListState,
+    // Pre-computed search cache (avoids repeated to_lowercase calls)
+    pub search_cache: Vec<ServerSearchCache>,
+    pub country_search_cache: Vec<CountrySearchCache>,
 }
 
 impl App {
-    fn get_entry_ip_for_server(server: &LogicalServer) -> &str {
-        server
-            .servers
-            .first()
-            .map(|s| s.entry_ip.as_str())
-            .unwrap_or("")
-    }
-
     pub fn new(client: ProtonClient, servers: Vec<LogicalServer>) -> App {
         let mut counts = HashMap::new();
         for server in &servers {
@@ -66,22 +62,24 @@ impl App {
         let mut country_list: Vec<String> = counts.keys().cloned().collect();
         country_list.sort_by_key(|a| countries::get_country_name(a));
 
-        // Pre-compute sorted server indices (by country name, entry IP, server name)
+        // Build search caches (pre-compute lowercase strings once)
+        let search_cache = Self::build_search_cache(&servers);
+        let country_search_cache = Self::build_country_search_cache(&country_list);
+
+        // Pre-compute sorted server indices using cached data
         let mut sorted_indices: Vec<usize> = (0..servers.len()).collect();
         sorted_indices.sort_by(|&a, &b| {
-            let server_a = &servers[a];
-            let server_b = &servers[b];
-            let country_cmp = countries::get_country_name(&server_a.exit_country)
-                .cmp(&countries::get_country_name(&server_b.exit_country));
+            let cache_a = &search_cache[a];
+            let cache_b = &search_cache[b];
+            let country_cmp = cache_a.country_name.cmp(&cache_b.country_name);
             if country_cmp != std::cmp::Ordering::Equal {
                 return country_cmp;
             }
-            let entry_ip_cmp = Self::get_entry_ip_for_server(server_a)
-                .cmp(Self::get_entry_ip_for_server(server_b));
+            let entry_ip_cmp = cache_a.entry_ip.cmp(&cache_b.entry_ip);
             if entry_ip_cmp != std::cmp::Ordering::Equal {
                 return entry_ip_cmp;
             }
-            server_a.name.cmp(&server_b.name)
+            servers[a].name.cmp(&servers[b].name)
         });
 
         // Compute unique entry IPs
@@ -127,6 +125,9 @@ impl App {
             country_state: ListState::default(),
             split_server_items: Vec::new(),
             server_state: ListState::default(),
+            // Pre-computed search cache
+            search_cache,
+            country_search_cache,
         };
         app.update_display_list();
         if !app.displayed_items.is_empty() {
