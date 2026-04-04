@@ -11,35 +11,31 @@ impl App {
         }
 
         if self.split_view {
-            // Entering split view - apply current search state
-            if !self.search_query.is_empty() {
-                self.update_split_view_for_search();
-            } else {
-                // Restore full country list (in case it was filtered before)
-                self.country_list = self.full_country_list.clone();
+            // Entering split view
+            // Restore full country list (in case it was filtered before)
+            self.country_list = self.full_country_list.clone();
 
-                // Sync country selection with current tree view selection
-                if let Some(idx) = self.state.selected() {
-                    if let Some(item) = self.displayed_items.get(idx) {
-                        let country_code = match item {
-                            DisplayItem::CountryHeader(c) => c.clone(),
-                            DisplayItem::EntryIpHeader(c, _) => c.clone(),
-                            DisplayItem::Server(server_idx) => {
-                                self.all_servers[*server_idx].exit_country.clone()
-                            }
-                        };
-                        if let Some(pos) = self.country_list.iter().position(|c| c == &country_code)
-                        {
-                            self.country_state.select(Some(pos));
+            // Sync country selection with current tree view selection
+            if let Some(idx) = self.state.selected() {
+                if let Some(item) = self.displayed_items.get(idx) {
+                    let country_code = match item {
+                        DisplayItem::CountryHeader(c) => c.clone(),
+                        DisplayItem::EntryIpHeader(c, _) => c.clone(),
+                        DisplayItem::RegionHeader(c, _) => c.clone(),
+                        DisplayItem::Server(server_idx) => {
+                            self.all_servers[*server_idx].exit_country.clone()
                         }
+                    };
+                    if let Some(pos) = self.country_list.iter().position(|c| c == &country_code) {
+                        self.country_state.select(Some(pos));
                     }
                 }
-                // Ensure we have a valid selection
-                if self.country_state.selected().is_none() && !self.country_list.is_empty() {
-                    self.country_state.select(Some(0));
-                }
-                self.update_server_list_for_selected_country();
             }
+            // Ensure we have a valid selection
+            if self.country_state.selected().is_none() && !self.country_list.is_empty() {
+                self.country_state.select(Some(0));
+            }
+            self.update_server_list_for_selected_country();
             self.split_focus = SplitFocus::Countries;
         } else {
             // Exiting split view - refresh tree view with current search state
@@ -58,33 +54,58 @@ impl App {
         self.split_server_items.clear();
         if let Some(idx) = self.country_state.selected() {
             if let Some(country_code) = self.country_list.get(idx) {
+                let filter_active = self.active_filter.is_active();
                 // Collect server indices for this country
                 let mut server_indices: Vec<usize> = self
                     .all_servers
                     .iter()
                     .enumerate()
-                    .filter(|(_, s)| &s.exit_country == country_code)
+                    .filter(|(i, s)| {
+                        &s.exit_country == country_code
+                            && (!filter_active || self.passes_filter(*i))
+                    })
                     .map(|(i, _)| i)
                     .collect();
 
-                // Sort by entry IP then name for consistent grouping (using cached entry_ip)
+                // Sort by region (None last), then entry IP, then name
                 server_indices.sort_by(|&a, &b| {
-                    self.search_cache[a]
-                        .entry_ip
-                        .cmp(&self.search_cache[b].entry_ip)
+                    let ca = &self.search_cache[a];
+                    let cb = &self.search_cache[b];
+                    let region_cmp = match (&ca.region_name, &cb.region_name) {
+                        (Some(a_r), Some(b_r)) => a_r.cmp(b_r),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    };
+                    region_cmp
+                        .then(ca.entry_ip.cmp(&cb.entry_ip))
                         .then(self.all_servers[a].name.cmp(&self.all_servers[b].name))
                 });
 
                 if self.group_by_entry_ip {
+                    let mut current_region = String::new();
                     let mut current_entry_ip = String::new();
                     for i in server_indices {
-                        let entry_ip = self.get_entry_ip_for_idx(i);
-                        if entry_ip != current_entry_ip {
-                            current_entry_ip = entry_ip.to_string();
-                            self.split_server_items.push(DisplayItem::EntryIpHeader(
-                                country_code.clone(),
-                                current_entry_ip.clone(),
-                            ));
+                        let cache = &self.search_cache[i];
+                        if let Some(ref rc) = cache.region_code {
+                            // US server with region
+                            if *rc != current_region {
+                                current_region = rc.clone();
+                                self.split_server_items.push(DisplayItem::RegionHeader(
+                                    country_code.clone(),
+                                    current_region.clone(),
+                                ));
+                            }
+                        } else {
+                            // Non-US: use entry IP header
+                            let entry_ip = self.get_entry_ip_for_idx(i);
+                            if entry_ip != current_entry_ip {
+                                current_entry_ip = entry_ip.to_string();
+                                self.split_server_items.push(DisplayItem::EntryIpHeader(
+                                    country_code.clone(),
+                                    current_entry_ip.clone(),
+                                ));
+                            }
                         }
                         self.split_server_items.push(DisplayItem::Server(i));
                     }
@@ -108,97 +129,6 @@ impl App {
             }
         }
         self.server_state.select(None);
-    }
-
-    pub fn update_split_view_for_search(&mut self) {
-        if self.search_query.is_empty() {
-            // Restore full country list and normal behavior
-            self.country_list = self.full_country_list.clone();
-            if !self.country_list.is_empty() {
-                if self.country_state.selected().is_none() {
-                    self.country_state.select(Some(0));
-                }
-                self.update_server_list_for_selected_country();
-            }
-            return;
-        }
-
-        let query = &self.search_query;
-
-        // 1. Find ALL matching servers with scores (regardless of country)
-        let mut scored_servers = self.collect_scored_servers(query);
-
-        // Sort by score (lower is better), then by entry IP, then by server name
-        // Using cached entry_ip to avoid repeated lookups
-        scored_servers.sort_by(|a, b| {
-            let score_cmp = a.1.cmp(&b.1);
-            if score_cmp != std::cmp::Ordering::Equal {
-                return score_cmp;
-            }
-            self.search_cache[a.0]
-                .entry_ip
-                .cmp(&self.search_cache[b.0].entry_ip)
-                .then(self.all_servers[a.0].name.cmp(&self.all_servers[b.0].name))
-        });
-
-        // Build split_server_items with optional IP grouping
-        self.split_server_items.clear();
-        if self.group_by_entry_ip {
-            let mut current_entry_ip = String::new();
-            for (idx, _) in scored_servers {
-                let entry_ip = self.get_entry_ip_for_idx(idx);
-                let country = self.all_servers[idx].exit_country.clone();
-                if entry_ip != current_entry_ip {
-                    current_entry_ip = entry_ip.to_string();
-                    self.split_server_items.push(DisplayItem::EntryIpHeader(
-                        country,
-                        current_entry_ip.clone(),
-                    ));
-                }
-                self.split_server_items.push(DisplayItem::Server(idx));
-            }
-        } else {
-            for (idx, _) in scored_servers {
-                self.split_server_items.push(DisplayItem::Server(idx));
-            }
-        }
-
-        // 2. Filter and sort country list by best match score
-        // Uses cached country names to avoid repeated lookups
-        let mut scored_countries = self.collect_scored_countries(query);
-
-        // Build a map from code to cached name for sorting
-        let country_name_map: std::collections::HashMap<&str, &str> = self
-            .country_search_cache
-            .iter()
-            .map(|c| (c.code.as_str(), c.name.as_str()))
-            .collect();
-
-        scored_countries.sort_by(|a, b| {
-            let score_cmp = a.1.cmp(&b.1);
-            if score_cmp != std::cmp::Ordering::Equal {
-                return score_cmp;
-            }
-            let name_a = country_name_map
-                .get(a.0.as_str())
-                .copied()
-                .unwrap_or(a.0.as_str());
-            let name_b = country_name_map
-                .get(b.0.as_str())
-                .copied()
-                .unwrap_or(b.0.as_str());
-            name_a.cmp(name_b)
-        });
-
-        self.country_list = scored_countries.into_iter().map(|(code, _)| code).collect();
-
-        // 3. Reset selections
-        self.select_first_server_in_split();
-        if !self.country_list.is_empty() {
-            self.country_state.select(Some(0));
-        } else {
-            self.country_state.select(None);
-        }
     }
 
     fn find_next_server_index(&self, from: usize, forward: bool) -> Option<usize> {

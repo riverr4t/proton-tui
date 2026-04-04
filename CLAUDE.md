@@ -61,7 +61,8 @@ Ratatui-based rendering with two view modes:
 ### Key Technical Details
 
 - Interface name: `proton-tui0`
-- Config path: `/tmp/proton-tui0.conf` (mode 600)
+- Config path: `$XDG_RUNTIME_DIR/proton-tui/proton-tui0.conf` (falls back to `/tmp/proton-tui/proton-tui0.conf`; mode 600, on tmpfs so private keys don't persist to disk)
+- Install binary: `cargo install --path .` (installs to `~/.cargo/bin/`) or copy `target/release/proton-tui` to a dir on the session PATH (e.g. `~/.local/share/omarchy/bin/` on Omarchy)
 - Linux only (requires `wg-quick`)
 - Requires sudo for VPN operations
 - DNS is not modified (relies on system DNS)

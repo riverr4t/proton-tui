@@ -3,11 +3,21 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+fn default_theme() -> String {
+    "default".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     pub group_by_entry_ip: bool,
     #[serde(default)]
     pub split_view: bool,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    #[serde(default)]
+    pub favorites: Vec<String>,
+    #[serde(default)]
+    pub auto_connect: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -15,6 +25,9 @@ impl Default for AppConfig {
         Self {
             group_by_entry_ip: true,
             split_view: false,
+            theme: default_theme(),
+            favorites: Vec::new(),
+            auto_connect: None,
         }
     }
 }

@@ -1,16 +1,68 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Clear, List, ListItem, Paragraph, Sparkline},
     Frame,
 };
 
-use crate::app::{App, DisplayItem, InputMode, SplitFocus};
+use crate::app::filter::{FEATURE_P2P, FEATURE_SC, FEATURE_STR, FEATURE_TOR};
+use crate::app::{App, DisplayItem, FocusPanel, SplitFocus};
 use crate::countries;
+use crate::theme::Theme;
 
 const SPLIT_COUNTRY_PERCENT: u16 = 35;
 const SPLIT_SERVER_PERCENT: u16 = 65;
+
+fn feature_badges<'a>(features: i32, theme: &Theme) -> Vec<Span<'a>> {
+    let mut spans = Vec::new();
+    if features & 1 != 0 {
+        spans.push(Span::styled(
+            " SC ",
+            Style::default().fg(theme.popup_bg).bg(theme.secure_core),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    if features & 2 != 0 {
+        spans.push(Span::styled(
+            " TOR ",
+            Style::default().fg(theme.popup_bg).bg(theme.warning),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    if features & 4 != 0 {
+        spans.push(Span::styled(
+            " P2P ",
+            Style::default().fg(theme.popup_bg).bg(theme.success),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    if features & 8 != 0 {
+        spans.push(Span::styled(
+            " STR ",
+            Style::default().fg(theme.popup_bg).bg(theme.info),
+        ));
+        spans.push(Span::raw(" "));
+    }
+    spans
+}
+
+fn load_bar<'a>(load: i32, color: ratatui::style::Color, compact: bool) -> Vec<Span<'a>> {
+    if compact {
+        return vec![Span::styled(
+            format!("{:>3}%", load),
+            Style::default().fg(color),
+        )];
+    }
+    let width = 10;
+    let filled = (load as usize * width / 100).min(width);
+    let empty = width - filled;
+    vec![
+        Span::styled("█".repeat(filled), Style::default().fg(color)),
+        Span::styled("░".repeat(empty), Style::default().fg(color)),
+        Span::styled(format!(" {:>3}%", load), Style::default().fg(color)),
+    ]
+}
 
 pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
@@ -33,108 +85,156 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 pub fn ui(frame: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
+    let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Length(3), // Search bar
-                Constraint::Min(0),    // List
-                Constraint::Length(3), // Status
-                Constraint::Length(1), // Keybinding hints
-            ]
-            .as_ref(),
-        )
+        .margin(1)
+        .constraints([Constraint::Min(0)])
         .split(frame.size());
 
-    // --- Search Bar ---
-    render_search_bar(frame, app, chunks[0]);
+    let fav_servers = app.get_favorite_servers();
+    let has_favorites = !fav_servers.is_empty();
+    let fav_count = fav_servers.len();
+    drop(fav_servers);
 
-    // --- List (Tree View or Split View) ---
-    if app.split_view {
-        render_split_view(frame, app, chunks[1]);
-    } else {
-        render_tree_view(frame, app, chunks[1]);
-    }
-
-    // --- Footer (Status) ---
-    render_status_bar(frame, app, chunks[2]);
-
-    // --- Keybinding Hints Bar ---
-    render_hints_bar(frame, app, chunks[3]);
-
-    // --- Popups ---
-    if app.show_connection_popup {
-        render_connection_popup(frame, app);
-    }
-
-    if app.show_help_popup {
-        render_help_popup(frame);
-    }
-}
-
-fn render_search_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let search_style = match app.input_mode {
-        InputMode::Normal => Style::default().fg(Color::DarkGray),
-        InputMode::Search => Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD),
-    };
-
-    // Count matching servers (exclude country headers and IP headers)
-    let match_count: usize = if !app.search_query.is_empty() {
-        if app.split_view {
-            app.split_server_items
-                .iter()
-                .filter(|item| matches!(item, DisplayItem::Server(_)))
-                .count()
-        } else {
-            app.displayed_items
-                .iter()
-                .filter(|item| matches!(item, DisplayItem::Server(_)))
-                .count()
-        }
+    let fav_height = if has_favorites {
+        (fav_count as u16 + 2).min(7) // +2 for borders, cap at 7
     } else {
         0
     };
 
-    let search_title = if app.input_mode == InputMode::Search {
-        if !app.search_query.is_empty() {
-            format!(
-                " Search ({} matches) - Enter to confirm, Esc to cancel ",
-                match_count
-            )
-        } else {
-            " Search (Enter to confirm, Esc to cancel) ".to_string()
-        }
-    } else if !app.search_query.is_empty() {
-        format!(" Search ({} matches) - '/' to edit ", match_count)
+    let status_height = if app.connection_status.is_some() {
+        14
     } else {
-        " Search ('/' to type) ".to_string()
+        4
     };
 
-    let search_bar = Paragraph::new(format!("  {}", app.search_query))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(search_title)
-                .border_style(search_style),
-        )
-        .style(search_style);
-    frame.render_widget(search_bar, area);
+    let chunks = if has_favorites {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(fav_height),    // Favorites panel
+                Constraint::Length(0),             // Search bar (hidden)
+                Constraint::Min(0),                // List
+                Constraint::Length(status_height), // Status
+                Constraint::Length(1),             // Keybinding hints
+            ])
+            .split(outer[0])
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(0),             // No favorites
+                Constraint::Length(0),             // Search bar (hidden)
+                Constraint::Min(0),                // List
+                Constraint::Length(status_height), // Status
+                Constraint::Length(1),             // Keybinding hints
+            ])
+            .split(outer[0])
+    };
 
-    if app.input_mode == InputMode::Search {
-        frame.set_cursor(area.x + 3 + app.search_cursor_position as u16, area.y + 1);
+    // --- Favorites Panel ---
+    if has_favorites {
+        render_favorites_panel(frame, app, chunks[0]);
+    }
+
+    // --- List (Tree View or Split View) ---
+    if app.split_view {
+        render_split_view(frame, app, chunks[2]);
+    } else {
+        render_tree_view(frame, app, chunks[2]);
+    }
+
+    // --- Footer (Status) ---
+    render_status_bar(frame, app, chunks[3]);
+
+    // --- Keybinding Hints Bar ---
+    render_hints_bar(frame, app, chunks[4]);
+
+    // --- Popups ---
+    if app.show_help_popup {
+        render_help_popup(frame, &app.theme);
+    }
+
+    if app.show_filter_popup {
+        render_filter_popup(frame, app);
     }
 }
 
-fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
-    let servers_title = add_connected_badge("ProtonVPN Servers", app.connection_status.is_some());
+fn render_favorites_panel(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme;
+    let focused = app.focus_panel == FocusPanel::Favorites;
+    let border_type = if focused {
+        BorderType::Thick
+    } else {
+        BorderType::default()
+    };
+    let border_style = if focused {
+        Style::default().fg(t.border_active)
+    } else {
+        Style::default()
+    };
+    let title_style = if focused {
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
 
-    if app.displayed_items.is_empty() && !app.search_query.is_empty() {
-        let border_style = Style::default().fg(Color::Gray);
-        render_empty_list(frame, area, servers_title, border_style);
-        return;
-    }
+    let fav_servers = app.get_favorite_servers();
+    let items: Vec<ListItem> = fav_servers
+        .iter()
+        .map(|(_, s)| {
+            let load_color = if s.load < 30 {
+                t.load_low
+            } else if s.load < 70 {
+                t.load_medium
+            } else {
+                t.load_high
+            };
+            let country_name = countries::get_country_name(&s.exit_country);
+            let country_flag = countries::get_country_flag(&s.exit_country);
+
+            let mut spans = vec![
+                Span::styled("󰓎 ", Style::default().fg(t.accent)),
+                Span::styled(format!("{:<12}", s.name), Style::default().fg(t.fg)),
+                Span::styled(
+                    format!(" {} {} ", country_flag, country_name),
+                    Style::default().fg(t.fg_dim),
+                ),
+                Span::styled(format!("{:>3}%", s.load), Style::default().fg(load_color)),
+            ];
+            spans.push(Span::raw("  "));
+            spans.extend(feature_badges(s.features, t));
+
+            ListItem::new(Line::from(spans))
+        })
+        .collect();
+
+    let highlight_style = if focused {
+        Style::default()
+            .bg(t.highlight_bg)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().bg(t.highlight_inactive_bg)
+    };
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(border_type)
+                .title(" Favorites ")
+                .title_style(title_style)
+                .border_style(border_style),
+        )
+        .highlight_style(highlight_style)
+        .highlight_symbol(if focused { "► " } else { "  " });
+
+    frame.render_stateful_widget(list, area, &mut app.favorites_state);
+}
+
+fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme;
+    let servers_title = add_connected_badge("ProtonVPN Servers", app.connection_status.is_some());
 
     let items: Vec<ListItem> = app
         .displayed_items
@@ -149,12 +249,10 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 let (icon, style) = if is_expanded {
                     (
                         "▼",
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.accent).add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    ("▶", Style::default().fg(Color::White))
+                    ("▶", Style::default().fg(t.fg))
                 };
 
                 ListItem::new(Line::from(vec![
@@ -165,14 +263,13 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                         format!("({}) ", country_code),
                         style.add_modifier(Modifier::DIM),
                     ),
-                    Span::styled(format!("[{}]", count), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("[{}]", count), Style::default().fg(t.fg_muted)),
                 ]))
             }
             DisplayItem::EntryIpHeader(country_code, entry_ip) => {
                 let key = (country_code.clone(), entry_ip.clone());
                 let is_expanded = app.expanded_entry_ips.contains(&key);
 
-                // Count servers with this entry IP in this country
                 let server_count = app
                     .all_servers
                     .iter()
@@ -185,12 +282,10 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 let (icon, style) = if is_expanded {
                     (
                         "▼",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.success).add_modifier(Modifier::BOLD),
                     )
                 } else {
-                    ("▶", Style::default().fg(Color::DarkGray))
+                    ("▶", Style::default().fg(t.fg_muted))
                 };
 
                 ListItem::new(Line::from(vec![
@@ -198,52 +293,135 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
                     Span::styled(format!("{} ", entry_ip), style),
                     Span::styled(
                         format!("[{}]", server_count),
-                        Style::default().fg(Color::DarkGray),
+                        Style::default().fg(t.fg_muted),
+                    ),
+                ]))
+            }
+            DisplayItem::RegionHeader(country_code, region_code) => {
+                let region_name = crate::regions::get_region_name(country_code, region_code)
+                    .unwrap_or(region_code.as_str());
+                let key = (country_code.clone(), region_code.clone());
+                let is_expanded = app.expanded_regions.contains(&key);
+
+                let server_count = app
+                    .all_servers
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, s)| {
+                        s.exit_country == *country_code
+                            && app.search_cache[*i].region_code.as_deref()
+                                == Some(region_code.as_str())
+                    })
+                    .count();
+
+                let (icon, style) = if is_expanded {
+                    (
+                        "▼",
+                        Style::default().fg(t.info).add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    ("▶", Style::default().fg(t.fg_muted))
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(format!("   {} ", icon), style),
+                    Span::styled(format!("{} ({}) ", region_name, region_code), style),
+                    Span::styled(
+                        format!("[{}]", server_count),
+                        Style::default().fg(t.fg_muted),
                     ),
                 ]))
             }
             DisplayItem::Server(idx) => {
                 let s = &app.all_servers[*idx];
                 let load_color = if s.load < 30 {
-                    Color::Green
+                    t.load_low
                 } else if s.load < 70 {
-                    Color::Yellow
+                    t.load_medium
                 } else {
-                    Color::Red
+                    t.load_high
                 };
 
-                let load_str = format!("{:>3}%", s.load);
+                let compact = frame.size().width < 100;
+                let fav = if app.is_favorite(&s.id) {
+                    "󰓎 "
+                } else {
+                    "  "
+                };
+                let connector = if s.is_secure_core() {
+                    "      ╰═ "
+                } else {
+                    "      ╰─ "
+                };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled("      ╰─ ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("{:<10}", s.name), Style::default().fg(Color::White)),
+                let mut spans = vec![
                     Span::styled(
-                        format!(" {:<15} ", s.city),
-                        Style::default().fg(Color::Gray),
+                        connector,
+                        Style::default().fg(if s.is_secure_core() {
+                            t.secure_core
+                        } else {
+                            t.fg_muted
+                        }),
                     ),
-                    Span::styled(" Load: ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(load_str, Style::default().fg(load_color)),
-                    Span::styled(
-                        format!("  [{}]", App::format_features(s.features)),
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ),
-                ]))
+                    Span::styled(fav, Style::default().fg(t.accent)),
+                    Span::styled(format!("{:<10}", s.name), Style::default().fg(t.fg)),
+                ];
+                // Show SC route: "Entry → Exit"
+                if s.is_secure_core() && s.entry_country != s.exit_country {
+                    let entry_name = countries::get_country_name(&s.entry_country);
+                    let exit_name = countries::get_country_name(&s.exit_country);
+                    spans.push(Span::styled(
+                        format!(" {} → {} ", entry_name, exit_name),
+                        Style::default().fg(t.secure_core),
+                    ));
+                } else {
+                    let city_display = &app.search_cache[*idx].city_with_state;
+                    spans.push(Span::styled(
+                        format!(" {:<15} ", city_display),
+                        Style::default().fg(t.fg_dim),
+                    ));
+                }
+                spans.push(Span::styled(" ", Style::default()));
+                spans.extend(load_bar(s.load, load_color, compact));
+                spans.push(Span::raw("  "));
+                if !compact {
+                    spans.extend(feature_badges(s.features, t));
+                }
+
+                ListItem::new(Line::from(spans))
             }
         })
         .collect();
+
+    let tree_focused = app.focus_panel == FocusPanel::Main;
+    let tree_border_type = if tree_focused {
+        BorderType::Thick
+    } else {
+        BorderType::default()
+    };
+    let tree_border_style = if tree_focused {
+        Style::default().fg(t.border_active)
+    } else {
+        Style::default()
+    };
+    let tree_title_style = if tree_focused {
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+    };
 
     let servers_list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_type(tree_border_type)
                 .title(servers_title)
-                .border_style(Style::default().fg(Color::Gray)),
+                .title_style(tree_title_style)
+                .border_style(tree_border_style),
         )
         .highlight_style(
             Style::default()
-                .bg(Color::Rgb(40, 44, 52))
+                .bg(t.highlight_bg)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol(" ");
@@ -252,6 +430,7 @@ fn render_tree_view(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme;
     let split_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints(
@@ -263,29 +442,27 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .split(area);
 
-    let is_searching = !app.search_query.is_empty();
-
     // Country list
-    let country_border_style = if app.split_focus == SplitFocus::Countries {
-        Style::default().fg(Color::Cyan)
+    let country_focused = app.split_focus == SplitFocus::Countries;
+    let country_border_type = if country_focused {
+        BorderType::Thick
     } else {
-        Style::default().fg(Color::DarkGray)
+        BorderType::default()
+    };
+    let country_border_style = if country_focused {
+        Style::default().fg(t.border_active)
+    } else {
+        Style::default()
+    };
+    let country_title_style = if country_focused {
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
     };
 
-    // Build country title with counts
-    let country_title = if is_searching {
-        format!(
-            " Countries ({}/{}) ",
-            app.country_list.len(),
-            app.full_country_list.len()
-        )
-    } else {
-        format!(" Countries ({}) ", app.full_country_list.len())
-    };
+    let country_title = format!(" Countries ({}) ", app.full_country_list.len());
 
-    if is_searching && app.country_list.is_empty() {
-        render_empty_list(frame, split_chunks[0], country_title, country_border_style);
-    } else {
+    {
         let country_items: Vec<ListItem> = app
             .country_list
             .iter()
@@ -296,11 +473,8 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
 
                 ListItem::new(Line::from(vec![
                     Span::styled(format!(" {} ", country_flag), Style::default()),
-                    Span::styled(
-                        format!("{} ", country_name),
-                        Style::default().fg(Color::White),
-                    ),
-                    Span::styled(format!("[{}]", count), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{} ", country_name), Style::default().fg(t.fg)),
+                    Span::styled(format!("[{}]", count), Style::default().fg(t.fg_muted)),
                 ]))
             })
             .collect();
@@ -309,19 +483,21 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
             if app.split_focus == SplitFocus::Countries {
                 (
                     Style::default()
-                        .bg(Color::Rgb(40, 44, 52))
+                        .bg(t.highlight_bg)
                         .add_modifier(Modifier::BOLD),
                     "► ",
                 )
             } else {
-                (Style::default().bg(Color::Rgb(30, 32, 36)), "  ")
+                (Style::default().bg(t.highlight_inactive_bg), "  ")
             };
 
         let country_list = List::new(country_items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(country_border_type)
                     .title(country_title)
+                    .title_style(country_title_style)
                     .border_style(country_border_style),
             )
             .highlight_style(country_highlight_style)
@@ -331,46 +507,46 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Server list for selected country
-    let server_border_style = if app.split_focus == SplitFocus::Servers {
-        Style::default().fg(Color::Cyan)
+    let server_focused = app.split_focus == SplitFocus::Servers;
+    let server_border_type = if server_focused {
+        BorderType::Thick
     } else {
-        Style::default().fg(Color::DarkGray)
+        BorderType::default()
+    };
+    let server_border_style = if server_focused {
+        Style::default().fg(t.border_active)
+    } else {
+        Style::default()
+    };
+    let server_title_style = if server_focused {
+        Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
     };
 
-    // Get selected country name for title with counts
     let server_count = app
         .split_server_items
         .iter()
         .filter(|item| matches!(item, DisplayItem::Server(_)))
         .count();
-    let selected_country_name = if is_searching {
-        format!("Servers ({}/{})", server_count, app.all_servers.len())
-    } else {
-        app.country_state
-            .selected()
-            .and_then(|idx| app.country_list.get(idx))
-            .map(|code| {
-                format!(
-                    "Servers - {} ({}/{})",
-                    countries::get_country_name(code),
-                    server_count,
-                    app.all_servers.len()
-                )
-            })
-            .unwrap_or_else(|| format!("Servers ({})", app.all_servers.len()))
-    };
+    let selected_country_name = app
+        .country_state
+        .selected()
+        .and_then(|idx| app.country_list.get(idx))
+        .map(|code| {
+            format!(
+                "Servers - {} ({}/{})",
+                countries::get_country_name(code),
+                server_count,
+                app.all_servers.len()
+            )
+        })
+        .unwrap_or_else(|| format!("Servers ({})", app.all_servers.len()));
 
     let server_list_title =
         add_connected_badge(&selected_country_name, app.connection_status.is_some());
 
-    if is_searching && app.split_server_items.is_empty() {
-        render_empty_list(
-            frame,
-            split_chunks[1],
-            server_list_title,
-            server_border_style,
-        );
-    } else {
+    {
         let server_items: Vec<ListItem> = app
             .split_server_items
             .iter()
@@ -378,37 +554,58 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
                 DisplayItem::EntryIpHeader(_, entry_ip) => {
                     ListItem::new(Line::from(vec![Span::styled(
                         format!(" {} ", entry_ip),
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(t.success).add_modifier(Modifier::BOLD),
                     )]))
                 }
                 DisplayItem::Server(idx) => {
                     let s = &app.all_servers[*idx];
                     let load_color = if s.load < 30 {
-                        Color::Green
+                        t.load_low
                     } else if s.load < 70 {
-                        Color::Yellow
+                        t.load_medium
                     } else {
-                        Color::Red
+                        t.load_high
                     };
 
-                    let load_str = format!("{:>3}%", s.load);
+                    let compact = frame.size().width < 100;
+                    let fav = if app.is_favorite(&s.id) {
+                        "󰓎 "
+                    } else {
+                        "  "
+                    };
+                    let mut spans = vec![
+                        Span::styled(fav, Style::default().fg(t.accent)),
+                        Span::styled(format!("{:<12}", s.name), Style::default().fg(t.fg)),
+                    ];
+                    if s.is_secure_core() && s.entry_country != s.exit_country {
+                        let entry_name = countries::get_country_name(&s.entry_country);
+                        let exit_name = countries::get_country_name(&s.exit_country);
+                        spans.push(Span::styled(
+                            format!("{} → {} ", entry_name, exit_name),
+                            Style::default().fg(t.secure_core),
+                        ));
+                    } else {
+                        let city_display = &app.search_cache[*idx].city_with_state;
+                        spans.push(Span::styled(
+                            format!("{:<15}", city_display),
+                            Style::default().fg(t.fg_dim),
+                        ));
+                    }
+                    spans.extend(load_bar(s.load, load_color, compact));
+                    spans.push(Span::raw("  "));
+                    if !compact {
+                        spans.extend(feature_badges(s.features, t));
+                    }
 
-                    ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!(" {:<12}", s.name),
-                            Style::default().fg(Color::White),
-                        ),
-                        Span::styled(format!("{:<15}", s.city), Style::default().fg(Color::Gray)),
-                        Span::styled(load_str.to_string(), Style::default().fg(load_color)),
-                        Span::styled(
-                            format!("  {}", App::format_features(s.features)),
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::ITALIC),
-                        ),
-                    ]))
+                    ListItem::new(Line::from(spans))
+                }
+                DisplayItem::RegionHeader(country_code, region_code) => {
+                    let region_name = crate::regions::get_region_name(country_code, region_code)
+                        .unwrap_or(region_code.as_str());
+                    ListItem::new(Line::from(vec![Span::styled(
+                        format!(" {} ({}) ", region_name, region_code),
+                        Style::default().fg(t.info).add_modifier(Modifier::BOLD),
+                    )]))
                 }
                 DisplayItem::CountryHeader(_) => ListItem::new(Line::from("")),
             })
@@ -418,19 +615,21 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
             if app.split_focus == SplitFocus::Servers {
                 (
                     Style::default()
-                        .bg(Color::Rgb(40, 44, 52))
+                        .bg(t.highlight_bg)
                         .add_modifier(Modifier::BOLD),
                     "► ",
                 )
             } else {
-                (Style::default().bg(Color::Rgb(30, 32, 36)), "  ")
+                (Style::default().bg(t.highlight_inactive_bg), "  ")
             };
 
         let server_list = List::new(server_items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
+                    .border_type(server_border_type)
                     .title(server_list_title)
+                    .title_style(server_title_style)
                     .border_style(server_border_style),
             )
             .highlight_style(server_highlight_style)
@@ -441,253 +640,294 @@ fn render_split_view(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let stats = format!(
-        "Servers: {} | Entry IPs: {}",
-        app.total_servers, app.unique_entry_ips
-    );
+    let t = &app.theme;
 
-    let footer_text = if let Some(status) = &app.connection_status {
+    if let Some(status) = &app.connection_status {
+        // Expanded connected view with sparklines
         let duration = status.connected_at.elapsed();
         let secs = duration.as_secs();
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
         let s = secs % 60;
-        if app.status_message.is_empty() {
-            format!(
-                " Connected: {} | Uptime {:02}:{:02}:{:02} | {} ",
-                status.server_name, h, m, s, stats
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::default())
+            .title(" Status ")
+            .border_style(Style::default().fg(t.border_active));
+        let inner_area = block.inner(area);
+        frame.render_widget(block, area);
+
+        let sub_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Info text (status/server/speeds)
+                Constraint::Length(3), // RX sparkline with border
+                Constraint::Length(3), // TX sparkline with border
+                Constraint::Length(1), // Disconnect hint
+            ])
+            .split(inner_area);
+
+        // Info lines
+        let line1 = Line::from(vec![
+            Span::styled(
+                " 󰌘 ",
+                Style::default().fg(t.success).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Connected",
+                Style::default().fg(t.success).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(&status.server_name, Style::default().fg(t.fg)),
+            Span::styled("  ", Style::default()),
+            Span::styled(&status.interface, Style::default().fg(t.fg_dim)),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("{:02}:{:02}:{:02}", h, m, s),
+                Style::default().fg(t.fg),
+            ),
+        ]);
+        let line2 = Line::from(vec![
+            Span::styled(
+                format!(" ↓ {} ", App::speed_to_human(status.rx_speed)),
+                Style::default().fg(t.info).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({})", App::bytes_to_human(status.rx_bytes)),
+                Style::default().fg(t.fg_dim),
+            ),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("↑ {} ", App::speed_to_human(status.tx_speed)),
+                Style::default().fg(t.upload).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("({})", App::bytes_to_human(status.tx_bytes)),
+                Style::default().fg(t.fg_dim),
+            ),
+        ]);
+        let info = Paragraph::new(vec![line1, line2]);
+        frame.render_widget(info, sub_layout[0]);
+
+        // RX sparkline
+        let rx_sparkline = Sparkline::default()
+            .block(
+                Block::default()
+                    .title(format!(
+                        " 󰇚 Download: {} ",
+                        App::speed_to_human(status.rx_speed)
+                    ))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::default())
+                    .border_style(Style::default().fg(t.border)),
             )
-        } else {
-            format!(
-                " Connected: {} | Uptime {:02}:{:02}:{:02} | {} ",
-                status.server_name, h, m, s, app.status_message
+            .data(&status.rx_history)
+            .style(Style::default().fg(t.info));
+        frame.render_widget(rx_sparkline, sub_layout[1]);
+
+        // TX sparkline
+        let tx_sparkline = Sparkline::default()
+            .block(
+                Block::default()
+                    .title(format!(
+                        " 󰕒 Upload: {} ",
+                        App::speed_to_human(status.tx_speed)
+                    ))
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::default())
+                    .border_style(Style::default().fg(t.border)),
             )
-        }
-    } else if app.status_message.is_empty() {
-        format!(" {} ", stats)
+            .data(&status.tx_history)
+            .style(Style::default().fg(t.upload));
+        frame.render_widget(tx_sparkline, sub_layout[2]);
+
+        // Disconnect hint
+        let hint = Paragraph::new(Line::from(Span::styled(
+            "Press 'd' to disconnect",
+            Style::default().fg(t.error).add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(hint, sub_layout[3]);
     } else {
-        format!(" {} ", app.status_message)
-    };
+        // Disconnected compact view
+        let filter_info = if app.active_filter.is_active() {
+            format!(" | Filtered: {}", app.active_filter.active_count())
+        } else {
+            String::new()
+        };
+        let fav_count = app.favorites.len();
+        let fav_info = if fav_count > 0 {
+            format!(" | Favorites: {}", fav_count)
+        } else {
+            String::new()
+        };
+        let sort_info = format!(
+            " | Sort: {} {}",
+            app.sort_field.label(),
+            app.sort_direction.indicator()
+        );
 
-    let footer = Paragraph::new(footer_text)
-        .block(Block::default().borders(Borders::ALL).title(" Status "))
-        .style(Style::default().fg(Color::Cyan));
+        let line1 = if !app.status_message.is_empty() {
+            format!(" 󰌙 {}", app.status_message)
+        } else {
+            " 󰌙 Ready".to_string()
+        };
 
-    frame.render_widget(footer, area);
+        let line2 = format!(
+            " Servers: {} | Entry IPs: {}{}{}{}",
+            app.total_servers, app.unique_entry_ips, filter_info, fav_info, sort_info
+        );
+
+        let footer = Paragraph::new(vec![Line::from(line1), Line::from(line2)])
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::default())
+                    .title(" Status ")
+                    .border_style(Style::default()),
+            )
+            .style(Style::default().fg(t.accent));
+
+        frame.render_widget(footer, area);
+    }
 }
 
 fn render_hints_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let key_style = Style::default().fg(Color::Black).bg(Color::DarkGray);
-    let sep_style = Style::default().fg(Color::DarkGray);
-    let desc_style = Style::default().fg(Color::Gray);
+    let t = &app.theme;
+    let key_style = Style::default().fg(t.info).add_modifier(Modifier::BOLD);
+    let sep_style = Style::default().fg(t.fg_muted);
+    let desc_style = Style::default().fg(t.info);
+
+    let connected = app.connection_status.is_some();
 
     let hints = if app.show_help_popup {
-        // Help popup: any key closes it
         Line::from(vec![
-            Span::styled(" Any Key ", key_style),
-            Span::styled(" Close ", desc_style),
+            Span::styled("Any Key", key_style),
+            Span::styled(" Close", desc_style),
         ])
-    } else if app.show_connection_popup {
-        // Connection popup: disconnect or close
+    } else if app.focus_panel == FocusPanel::Favorites {
         Line::from(vec![
-            Span::styled(" d ", key_style),
-            Span::styled(" Disconnect ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Esc ", key_style),
-            Span::styled(" Close ", desc_style),
-        ])
-    } else if app.input_mode == InputMode::Search {
-        // Search mode: confirm, cancel, help
-        Line::from(vec![
-            Span::styled(" Enter ", key_style),
-            Span::styled(" Confirm ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Esc ", key_style),
-            Span::styled(" Cancel ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" ? ", key_style),
+            Span::styled("Tab", key_style),
+            Span::styled(" Switch ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("Enter", key_style),
+            Span::styled(" Connect ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("F", key_style),
+            Span::styled(" Unfav ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("?", key_style),
             Span::styled(" Help ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("q", key_style),
+            Span::styled(" Quit", desc_style),
         ])
     } else if app.split_view {
-        // Split view: pane-specific hints
         match app.split_focus {
-            SplitFocus::Countries => {
-                // Countries pane focused
-                Line::from(vec![
-                    Span::styled(" Tab ", key_style),
-                    Span::styled(" Switch ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" Enter ", key_style),
-                    Span::styled(" Select ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" v ", key_style),
-                    Span::styled(" Tree ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" ? ", key_style),
-                    Span::styled(" Help ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" q ", key_style),
-                    Span::styled(" Quit ", desc_style),
-                ])
-            }
+            SplitFocus::Countries => Line::from(vec![
+                Span::styled("Tab", key_style),
+                Span::styled(" Switch ", desc_style),
+                Span::styled("| ", sep_style),
+                Span::styled("Enter", key_style),
+                Span::styled(" Select ", desc_style),
+                Span::styled("| ", sep_style),
+                Span::styled("v", key_style),
+                Span::styled(" Tree ", desc_style),
+                Span::styled("| ", sep_style),
+                Span::styled("?", key_style),
+                Span::styled(" Help ", desc_style),
+                Span::styled("| ", sep_style),
+                Span::styled("q", key_style),
+                Span::styled(" Quit", desc_style),
+            ]),
             SplitFocus::Servers => {
-                // Servers pane focused
-                Line::from(vec![
-                    Span::styled(" Tab ", key_style),
+                let mut spans = vec![
+                    Span::styled("Tab", key_style),
                     Span::styled(" Switch ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" Enter ", key_style),
+                    Span::styled("| ", sep_style),
+                    Span::styled("Enter", key_style),
                     Span::styled(" Connect ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" ← ", key_style),
+                ];
+                if connected {
+                    spans.extend([
+                        Span::styled("| ", sep_style),
+                        Span::styled("d", key_style),
+                        Span::styled(" Disconnect ", desc_style),
+                    ]);
+                }
+                spans.extend([
+                    Span::styled("| ", sep_style),
+                    Span::styled("F", key_style),
+                    Span::styled(" Fav ", desc_style),
+                    Span::styled("| ", sep_style),
+                    Span::styled("←", key_style),
                     Span::styled(" Back ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" ? ", key_style),
+                    Span::styled("| ", sep_style),
+                    Span::styled("?", key_style),
                     Span::styled(" Help ", desc_style),
-                    Span::styled(" | ", sep_style),
-                    Span::styled(" q ", key_style),
-                    Span::styled(" Quit ", desc_style),
-                ])
+                    Span::styled("| ", sep_style),
+                    Span::styled("q", key_style),
+                    Span::styled(" Quit", desc_style),
+                ]);
+                Line::from(spans)
             }
         }
     } else {
-        // Tree view: essential navigation hints
-        Line::from(vec![
-            Span::styled(" / ", key_style),
-            Span::styled(" Search ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" Enter ", key_style),
+        let mut spans = vec![
+            Span::styled("f", key_style),
+            Span::styled(" Filter ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("F", key_style),
+            Span::styled(" Fav ", desc_style),
+            Span::styled("| ", sep_style),
+            Span::styled("Enter", key_style),
             Span::styled(" Connect ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" v ", key_style),
+        ];
+        if connected {
+            spans.extend([
+                Span::styled("| ", sep_style),
+                Span::styled("d", key_style),
+                Span::styled(" Disconnect ", desc_style),
+            ]);
+        }
+        spans.extend([
+            Span::styled("| ", sep_style),
+            Span::styled("v", key_style),
             Span::styled(" Split ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" ? ", key_style),
+            Span::styled("| ", sep_style),
+            Span::styled("?", key_style),
             Span::styled(" Help ", desc_style),
-            Span::styled(" | ", sep_style),
-            Span::styled(" q ", key_style),
-            Span::styled(" Quit ", desc_style),
-        ])
+            Span::styled("| ", sep_style),
+            Span::styled("q", key_style),
+            Span::styled(" Quit", desc_style),
+        ]);
+        Line::from(spans)
     };
 
-    let hints_bar = Paragraph::new(hints);
+    let hints_bar = Paragraph::new(hints).alignment(Alignment::Center);
     frame.render_widget(hints_bar, area);
 }
 
 fn add_connected_badge(title: &str, connected: bool) -> String {
     if connected {
-        format!(" {} (Connected) ", title)
+        format!(" {} · Connected ", title)
     } else {
         format!(" {} ", title)
     }
 }
 
-fn render_empty_list(frame: &mut Frame, area: Rect, title: String, border_style: Style) {
-    let empty = Paragraph::new(" No results. Try a different query.")
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .border_style(border_style),
-        )
-        .style(Style::default().fg(Color::DarkGray));
-
-    frame.render_widget(empty, area);
-}
-
-fn render_connection_popup(frame: &mut Frame, app: &App) {
-    let block = Block::default()
-        .title(" Connection Status ")
-        .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Black));
-
-    let area = centered_rect(60, 50, frame.size());
-
-    frame.render_widget(Clear, area);
-    frame.render_widget(block, area);
-
-    let inner_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0)].as_ref())
-        .margin(1)
-        .split(area)[0];
-
-    let status_text = if let Some(status) = &app.connection_status {
-        let duration = status.connected_at.elapsed();
-        let secs = duration.as_secs();
-        let h = secs / 3600;
-        let m = (secs % 3600) / 60;
-        let s = secs % 60;
-
-        vec![
-            Line::from(vec![
-                Span::styled("Status: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    "Connected",
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Server: ", Style::default().fg(Color::Gray)),
-                Span::styled(&status.server_name, Style::default().fg(Color::White)),
-            ]),
-            Line::from(vec![
-                Span::styled("Interface: ", Style::default().fg(Color::Gray)),
-                Span::styled(&status.interface, Style::default().fg(Color::White)),
-            ]),
-            Line::from(vec![
-                Span::styled("Uptime: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:02}:{:02}:{:02}", h, m, s),
-                    Style::default().fg(Color::White),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Download: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    App::bytes_to_human(status.rx_bytes),
-                    Style::default().fg(Color::Cyan),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("Upload:   ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    App::bytes_to_human(status.tx_bytes),
-                    Style::default().fg(Color::Magenta),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Press 'd' to Disconnect or Esc to close",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            )),
-        ]
-    } else {
-        vec![Line::from("No active connection info.")]
-    };
-
-    let paragraph = Paragraph::new(status_text).alignment(ratatui::layout::Alignment::Center);
-
-    frame.render_widget(paragraph, inner_area);
-}
-
-fn render_help_popup(frame: &mut Frame) {
-    // Color palette
-    let bg_color = Color::Rgb(22, 22, 30);
-    let border_color = Color::Rgb(88, 91, 112);
-    let accent_color = Color::Rgb(137, 180, 250);
-    let key_fg = Color::Rgb(249, 226, 175);
-    let key_bg = Color::Rgb(49, 50, 68);
-    let desc_color = Color::Rgb(205, 214, 244);
-    let section_color = Color::Rgb(166, 227, 161);
-    let divider_color = Color::Rgb(69, 71, 90);
-    let footer_bg = Color::Rgb(49, 50, 68);
-    let footer_text = Color::Rgb(186, 194, 222);
+fn render_help_popup(frame: &mut Frame, theme: &Theme) {
+    let bg_color = theme.help_bg;
+    let border_color = theme.help_border;
+    let accent_color = theme.help_accent;
+    let key_fg = theme.help_key_fg;
+    let key_bg = theme.help_key_bg;
+    let desc_color = theme.help_desc;
+    let section_color = theme.help_section;
+    let divider_color = theme.help_divider;
+    let footer_bg = theme.help_footer_bg;
+    let footer_text = theme.help_footer_fg;
 
     // Fixed column widths for table-like alignment
     const KEY_WIDTH: usize = 10;
@@ -702,13 +942,14 @@ fn render_help_popup(frame: &mut Frame) {
     let popup_width = (content_width + 4) as u16;
 
     let block = Block::default()
-        .title(" 󰋖  Keyboard Shortcuts ")
+        .title(" Keyboard Shortcuts ")
         .title_style(
             Style::default()
                 .fg(accent_color)
                 .add_modifier(Modifier::BOLD),
         )
         .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(bg_color));
 
@@ -829,7 +1070,9 @@ fn render_help_popup(frame: &mut Frame) {
         ]),
         Line::from(""),
         make_row("/", "Search servers", "s", "Save config"),
-        make_row("i", "Toggle IP group", "d", "Disconnect VPN"),
+        make_row("i", "Toggle IP group", "f", "Filter & sort"),
+        make_row("F", "Toggle favorite", "A", "Auto-connect"),
+        make_row("c", "Secure Core", "d", "Disconnect VPN"),
         make_row("?", "Show this help", "q", "Quit application"),
     ];
 
@@ -845,5 +1088,142 @@ fn render_help_popup(frame: &mut Frame) {
         )]),
     ])
     .alignment(ratatui::layout::Alignment::Center);
+    frame.render_widget(footer, footer_area);
+}
+
+fn render_filter_popup(frame: &mut Frame, app: &App) {
+    let t = &app.theme;
+    let area = centered_rect(50, 60, frame.size());
+
+    let block = Block::default()
+        .title(" Filter & Sort ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(t.border_active))
+        .style(Style::default().bg(t.popup_bg));
+
+    frame.render_widget(Clear, area);
+    frame.render_widget(block, area);
+
+    let inner_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(2)].as_ref())
+        .margin(1)
+        .split(area);
+
+    let content_area = inner_area[0];
+    let footer_area = inner_area[1];
+
+    let selected = app.filter_popup_selected;
+    let filter = &app.active_filter;
+
+    let highlight = |idx: usize, text: &str| -> Style {
+        if idx == selected {
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(text.parse::<i32>().map_or(t.fg, |_| t.fg))
+        }
+    };
+    let _ = highlight; // suppress unused; we'll use a simpler approach
+
+    let make_item = |idx: usize, label: &str, value: &str| -> Line {
+        let is_sel = idx == selected;
+        let prefix = if is_sel { "► " } else { "  " };
+        let label_style = if is_sel {
+            Style::default().fg(t.accent).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(t.fg_dim)
+        };
+        let value_style = if is_sel {
+            Style::default().fg(t.fg).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(t.fg)
+        };
+        Line::from(vec![
+            Span::styled(prefix, label_style),
+            Span::styled(format!("{:<18}", label), label_style),
+            Span::styled(value.to_string(), value_style),
+        ])
+    };
+
+    // Row 0: Max load
+    let load_val = match filter.max_load {
+        Some(v) => format!("≤ {}%", v),
+        None => "Any".to_string(),
+    };
+
+    // Row 1: Secure Core
+    let sc_on = filter.features.is_some_and(|f| f & FEATURE_SC != 0);
+    // Row 2: Tor
+    let tor_on = filter.features.is_some_and(|f| f & FEATURE_TOR != 0);
+    // Row 3: P2P
+    let p2p_on = filter.features.is_some_and(|f| f & FEATURE_P2P != 0);
+    // Row 4: Streaming
+    let str_on = filter.features.is_some_and(|f| f & FEATURE_STR != 0);
+    // Row 5: Online only
+    let online_val = if filter.online_only { "Yes" } else { "No" };
+    // Row 6: Favorites only
+    let fav_val = if filter.favorites_only { "Yes" } else { "No" };
+    // Row 7: Sort field
+    let sort_val = format!(
+        "{} {}",
+        app.sort_field.label(),
+        app.sort_direction.indicator()
+    );
+    // Row 8: Reset
+
+    let check = |on: bool| -> &str {
+        if on {
+            "[x]"
+        } else {
+            "[ ]"
+        }
+    };
+
+    let lines = vec![
+        Line::from(""),
+        make_item(0, "Max Load", &load_val),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Feature Filters",
+            Style::default().fg(t.fg_dim).add_modifier(Modifier::BOLD),
+        )),
+        make_item(1, "Secure Core", check(sc_on)),
+        make_item(2, "Tor", check(tor_on)),
+        make_item(3, "P2P", check(p2p_on)),
+        make_item(4, "Streaming", check(str_on)),
+        Line::from(""),
+        make_item(5, "Online Only", online_val),
+        make_item(6, "Favorites Only", fav_val),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Sorting",
+            Style::default().fg(t.fg_dim).add_modifier(Modifier::BOLD),
+        )),
+        make_item(7, "Sort By", &sort_val),
+        Line::from(""),
+        make_item(8, "Reset All", ""),
+    ];
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, content_area);
+
+    // Footer
+    let fkey_style = Style::default().fg(t.info).add_modifier(Modifier::BOLD);
+    let fdesc_style = Style::default().fg(t.info);
+    let fsep_style = Style::default().fg(t.fg_muted);
+
+    let footer_line = Line::from(vec![
+        Span::styled("Enter", fkey_style),
+        Span::styled(" Toggle ", fdesc_style),
+        Span::styled("| ", fsep_style),
+        Span::styled("↑↓", fkey_style),
+        Span::styled(" Navigate ", fdesc_style),
+        Span::styled("| ", fsep_style),
+        Span::styled("Esc", fkey_style),
+        Span::styled(" Close", fdesc_style),
+    ]);
+    let footer = Paragraph::new(vec![Line::from(""), footer_line])
+        .alignment(ratatui::layout::Alignment::Center);
     frame.render_widget(footer, footer_area);
 }

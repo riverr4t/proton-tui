@@ -87,6 +87,15 @@ impl App {
                         }
                         self.update_display_list();
                     }
+                    DisplayItem::RegionHeader(country, region) => {
+                        let key = (country, region);
+                        if self.expanded_regions.contains(&key) {
+                            self.expanded_regions.remove(&key);
+                        } else {
+                            self.expanded_regions.insert(key);
+                        }
+                        self.update_display_list();
+                    }
                     DisplayItem::Server(_) => {
                         // handled by connect_to_selected usually
                     }
@@ -109,6 +118,13 @@ impl App {
                         let key = (country, entry_ip);
                         if !self.expanded_entry_ips.contains(&key) {
                             self.expanded_entry_ips.insert(key);
+                            self.update_display_list();
+                        }
+                    }
+                    DisplayItem::RegionHeader(country, region) => {
+                        let key = (country, region);
+                        if !self.expanded_regions.contains(&key) {
+                            self.expanded_regions.insert(key);
                             self.update_display_list();
                         }
                     }
@@ -150,9 +166,50 @@ impl App {
                             }
                         }
                     }
+                    DisplayItem::RegionHeader(country, region) => {
+                        let key = (country.clone(), region.clone());
+                        if self.expanded_regions.contains(&key) {
+                            self.expanded_regions.remove(&key);
+                            self.update_display_list();
+                        } else {
+                            // Already collapsed, collapse parent country
+                            if self.expanded_countries.contains(&country) {
+                                self.expanded_countries.remove(&country);
+                                self.update_display_list();
+
+                                if let Some(header_pos) =
+                                    self.displayed_items.iter().position(|it| {
+                                        matches!(it, DisplayItem::CountryHeader(c) if c == &country)
+                                    })
+                                {
+                                    self.state.select(Some(header_pos));
+                                }
+                            }
+                        }
+                    }
                     DisplayItem::Server(server_idx) => {
                         let server = &self.all_servers[server_idx];
                         let country = server.exit_country.clone();
+
+                        // Try collapsing region first
+                        if let Some(rc) = self.search_cache[server_idx].region_code.clone() {
+                            let region_key = (country.clone(), rc.clone());
+                            if self.expanded_regions.contains(&region_key) {
+                                self.expanded_regions.remove(&region_key);
+                                self.update_display_list();
+
+                                if let Some(header_pos) =
+                                    self.displayed_items.iter().position(|it| {
+                                        matches!(it, DisplayItem::RegionHeader(c, r) if c == &country && r == &rc)
+                                    })
+                                {
+                                    self.state.select(Some(header_pos));
+                                }
+                                return;
+                            }
+                        }
+
+                        // Fall back to collapsing entry IP group
                         let entry_ip = server
                             .servers
                             .first()
@@ -161,11 +218,9 @@ impl App {
                         let key = (country.clone(), entry_ip.clone());
 
                         if self.expanded_entry_ips.contains(&key) {
-                            // Collapse the entry IP group
                             self.expanded_entry_ips.remove(&key);
                             self.update_display_list();
 
-                            // Find the entry IP header and select it
                             if let Some(header_pos) = self.displayed_items.iter().position(|it| {
                                 matches!(it, DisplayItem::EntryIpHeader(c, ip) if c == &country && ip == &entry_ip)
                             }) {

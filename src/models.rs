@@ -24,6 +24,25 @@ pub struct LogicalServer {
     pub domain: Option<String>,
 }
 
+#[allow(dead_code)]
+impl LogicalServer {
+    pub fn is_secure_core(&self) -> bool {
+        self.features & 1 != 0
+    }
+
+    pub fn is_tor(&self) -> bool {
+        self.features & 2 != 0
+    }
+
+    pub fn is_p2p(&self) -> bool {
+        self.features & 4 != 0
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        self.features & 8 != 0
+    }
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ServerInstance {

@@ -5,12 +5,15 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{block::BorderType, Block, Borders, Clear, Paragraph},
     Frame, Terminal,
 };
 use std::time::Duration;
+
+use crate::config::AppConfig;
+use crate::theme::Theme;
 
 #[derive(PartialEq)]
 enum LoginField {
@@ -138,10 +141,11 @@ fn centered_rect(width: u16, height: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-fn render_login(frame: &mut Frame, form: &LoginForm) {
+fn render_login(frame: &mut Frame, form: &LoginForm, theme: &Theme) {
+    let t = theme;
     // Draw background
     let size = frame.size();
-    let bg = Block::default().style(Style::default().bg(Color::Black));
+    let bg = Block::default().style(Style::default().bg(t.popup_bg));
     frame.render_widget(bg, size);
 
     // Login box
@@ -150,10 +154,12 @@ fn render_login(frame: &mut Frame, form: &LoginForm) {
     frame.render_widget(Clear, login_area);
 
     let block = Block::default()
-        .title(" ProtonVPN Login ")
+        .title(" 󰦝 ProtonVPN Login ")
+        .title_style(Style::default().fg(t.accent).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .style(Style::default().bg(Color::Black));
+        .border_type(BorderType::Thick)
+        .border_style(Style::default().fg(t.border_active))
+        .style(Style::default().bg(t.popup_bg));
 
     frame.render_widget(block, login_area);
 
@@ -172,70 +178,84 @@ fn render_login(frame: &mut Frame, form: &LoginForm) {
 
     // Info text
     let info = Paragraph::new("Enter your Proton account credentials")
-        .style(Style::default().fg(Color::Gray))
+        .style(Style::default().fg(t.fg_dim))
         .alignment(ratatui::layout::Alignment::Center);
     frame.render_widget(info, inner[0]);
 
     // Username field
-    let username_style = if form.focused_field == LoginField::Username {
-        Style::default().fg(Color::Cyan)
+    let username_focused = form.focused_field == LoginField::Username;
+    let username_style = if username_focused {
+        Style::default().fg(t.border_active)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default()
+    };
+    let username_border_type = if username_focused {
+        BorderType::Thick
+    } else {
+        BorderType::default()
     };
 
     let username_block = Block::default()
         .title(" Username ")
         .borders(Borders::ALL)
+        .border_type(username_border_type)
         .border_style(username_style);
 
     let username_text = Paragraph::new(format!(" {}", form.username))
         .block(username_block)
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(t.fg));
     frame.render_widget(username_text, inner[2]);
 
     // Password field (masked)
-    let password_style = if form.focused_field == LoginField::Password {
-        Style::default().fg(Color::Cyan)
+    let password_focused = form.focused_field == LoginField::Password;
+    let password_style = if password_focused {
+        Style::default().fg(t.border_active)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default()
+    };
+    let password_border_type = if password_focused {
+        BorderType::Thick
+    } else {
+        BorderType::default()
     };
 
     let password_block = Block::default()
         .title(" Password ")
         .borders(Borders::ALL)
+        .border_type(password_border_type)
         .border_style(password_style);
 
     let masked_password: String = "•".repeat(form.password.len());
     let password_text = Paragraph::new(format!(" {}", masked_password))
         .block(password_block)
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(t.fg));
     frame.render_widget(password_text, inner[3]);
 
     // Status message
     let status_style = if form.status_is_error {
-        Style::default().fg(Color::Red)
+        Style::default().fg(t.error)
     } else {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(t.warning)
     };
     let status = Paragraph::new(form.status_message.as_str())
         .style(status_style)
         .alignment(ratatui::layout::Alignment::Center);
     frame.render_widget(status, inner[4]);
 
-    // Hints
-    let key_style = Style::default().fg(Color::Black).bg(Color::DarkGray);
-    let desc_style = Style::default().fg(Color::Gray);
-    let sep_style = Style::default().fg(Color::DarkGray);
+    // Hints (simple blue text style)
+    let hint_style = Style::default().fg(t.info);
+    let hint_bold = Style::default().fg(t.info).add_modifier(Modifier::BOLD);
+    let sep_style = Style::default().fg(t.fg_muted);
 
     let hints = Line::from(vec![
-        Span::styled(" Tab ", key_style),
-        Span::styled(" Switch ", desc_style),
-        Span::styled(" | ", sep_style),
-        Span::styled(" Enter ", key_style),
-        Span::styled(" Login ", desc_style),
-        Span::styled(" | ", sep_style),
-        Span::styled(" Esc ", key_style),
-        Span::styled(" Quit ", desc_style),
+        Span::styled("Tab", hint_bold),
+        Span::styled(" Switch ", hint_style),
+        Span::styled("| ", sep_style),
+        Span::styled("Enter", hint_bold),
+        Span::styled(" Login ", hint_style),
+        Span::styled("| ", sep_style),
+        Span::styled("Esc", hint_bold),
+        Span::styled(" Quit", hint_style),
     ]);
     let hints_para = Paragraph::new(hints).alignment(ratatui::layout::Alignment::Center);
     frame.render_widget(hints_para, inner[5]);
@@ -256,12 +276,19 @@ pub enum LoginResult {
     Cancel,
 }
 
+fn load_theme() -> Theme {
+    AppConfig::load()
+        .map(|c| Theme::from_name(&c.theme))
+        .unwrap_or_default()
+}
+
 /// Run the login form and return the result
 pub fn run_login<B: Backend>(terminal: &mut Terminal<B>) -> Result<LoginResult> {
     let mut form = LoginForm::new();
+    let theme = load_theme();
 
     loop {
-        terminal.draw(|f| render_login(f, &form))?;
+        terminal.draw(|f| render_login(f, &form, &theme))?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
@@ -323,35 +350,39 @@ pub fn run_login<B: Backend>(terminal: &mut Terminal<B>) -> Result<LoginResult> 
 /// Show authenticating status
 pub fn show_authenticating<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
     let mut form = LoginForm::new();
+    let theme = load_theme();
     form.set_status("Authenticating... (Esc to cancel)", false);
-    terminal.draw(|f| render_login(f, &form))?;
+    terminal.draw(|f| render_login(f, &form, &theme))?;
     Ok(())
 }
 
 /// Show a loading screen with a message
 pub fn show_loading<B: Backend>(terminal: &mut Terminal<B>, message: &str) -> Result<()> {
+    let theme = load_theme();
     terminal.draw(|f| {
+        let t = &theme;
         let size = f.size();
-        let bg = Block::default().style(Style::default().bg(Color::Black));
+        let bg = Block::default().style(Style::default().bg(t.popup_bg));
         f.render_widget(bg, size);
 
         let area = centered_rect(40, 5, size);
         f.render_widget(Clear, area);
 
         let block = Block::default()
-            .title(" ProtonVPN ")
+            .title(" 󰦝 ProtonVPN ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
-            .style(Style::default().bg(Color::Black));
+            .border_type(BorderType::Thick)
+            .border_style(Style::default().fg(t.border_active))
+            .style(Style::default().bg(t.popup_bg));
 
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let text = Paragraph::new(vec![
-            Line::from(Span::styled(message, Style::default().fg(Color::Yellow))),
+            Line::from(Span::styled(message, Style::default().fg(t.warning))),
             Line::from(Span::styled(
                 "Press Esc to cancel",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(t.fg_muted),
             )),
         ])
         .alignment(ratatui::layout::Alignment::Center);
@@ -363,11 +394,12 @@ pub fn show_loading<B: Backend>(terminal: &mut Terminal<B>, message: &str) -> Re
 /// Show error and wait for key press, returns true if user wants to retry
 pub fn show_error<B: Backend>(terminal: &mut Terminal<B>, error: &str) -> Result<bool> {
     let mut form = LoginForm::new();
+    let theme = load_theme();
     form.set_status(error, true);
 
     loop {
         terminal.draw(|f| {
-            render_login(f, &form);
+            render_login(f, &form, &theme);
 
             // Override hints to show retry option
             let size = f.size();
@@ -385,16 +417,16 @@ pub fn show_error<B: Backend>(terminal: &mut Terminal<B>, error: &str) -> Result
                 ])
                 .split(login_area);
 
-            let key_style = Style::default().fg(Color::Black).bg(Color::DarkGray);
-            let desc_style = Style::default().fg(Color::Gray);
-            let sep_style = Style::default().fg(Color::DarkGray);
+            let hint_style = Style::default().fg(theme.info);
+            let hint_bold = Style::default().fg(theme.info).add_modifier(Modifier::BOLD);
+            let sep_style = Style::default().fg(theme.fg_muted);
 
             let hints = Line::from(vec![
-                Span::styled(" Enter ", key_style),
-                Span::styled(" Retry ", desc_style),
-                Span::styled(" | ", sep_style),
-                Span::styled(" Esc ", key_style),
-                Span::styled(" Quit ", desc_style),
+                Span::styled("Enter", hint_bold),
+                Span::styled(" Retry ", hint_style),
+                Span::styled("| ", sep_style),
+                Span::styled("Esc", hint_bold),
+                Span::styled(" Quit", hint_style),
             ]);
             let hints_para = Paragraph::new(hints).alignment(ratatui::layout::Alignment::Center);
             f.render_widget(hints_para, inner[5]);

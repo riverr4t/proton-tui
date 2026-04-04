@@ -4,7 +4,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::os::unix::fs::PermissionsExt;
-use std::{env, fs, io, path::PathBuf, time::Instant};
+use std::{env, fs, io, path::Path, path::PathBuf, time::Instant};
 use tokio::process::Command;
 
 use super::{App, ConnectionStatus, DisplayItem};
@@ -48,6 +48,43 @@ impl App {
         })
     }
 
+    pub fn detect_existing_connection(&mut self) {
+        let iface_path = format!("/sys/class/net/{}", Self::get_interface_name());
+        if !Path::new(&iface_path).exists() {
+            return;
+        }
+
+        // Try to parse server name from the runtime config comment: "# Key for <server_name>"
+        let server_name = fs::read_to_string(Self::get_runtime_config_path())
+            .ok()
+            .and_then(|content| {
+                content
+                    .lines()
+                    .nth(1)
+                    .and_then(|line| line.strip_prefix("# Key for ").map(|s| s.to_string()))
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        self.log(format!("Detected existing connection to {}", server_name));
+        self.status_message = format!("Connected to {}", server_name);
+
+        let now = Instant::now();
+        self.connection_status = Some(ConnectionStatus {
+            server_name,
+            interface: Self::get_interface_name(),
+            connected_at: now,
+            rx_bytes: 0,
+            tx_bytes: 0,
+            prev_rx_bytes: 0,
+            prev_tx_bytes: 0,
+            last_sample_time: now,
+            rx_speed: 0.0,
+            tx_speed: 0.0,
+            rx_history: Vec::with_capacity(60),
+            tx_history: Vec::with_capacity(60),
+        });
+    }
+
     pub async fn start_wireguard(&mut self, config_path: &str, server_name: String) {
         self.log(format!("Starting WireGuard with {}...", config_path));
 
@@ -73,14 +110,21 @@ impl App {
                 if s.success() {
                     self.log("WireGuard started successfully.".to_string());
                     self.status_message = "Connected to VPN".to_string();
+                    let now = Instant::now();
                     self.connection_status = Some(ConnectionStatus {
                         server_name,
                         interface: Self::get_interface_name(),
-                        connected_at: Instant::now(),
+                        connected_at: now,
                         rx_bytes: 0,
                         tx_bytes: 0,
+                        prev_rx_bytes: 0,
+                        prev_tx_bytes: 0,
+                        last_sample_time: now,
+                        rx_speed: 0.0,
+                        tx_speed: 0.0,
+                        rx_history: Vec::with_capacity(60),
+                        tx_history: Vec::with_capacity(60),
                     });
-                    self.show_connection_popup = true;
                 } else {
                     self.log("Failed to start WireGuard.".to_string());
                     self.status_message = "Connection Failed".to_string();
@@ -116,7 +160,6 @@ impl App {
                 if s.success() {
                     self.log("Disconnected.".to_string());
                     self.connection_status = None;
-                    self.show_connection_popup = false;
 
                     let id_opt = self.current_config_id.clone();
                     if let Some(id) = id_opt {
@@ -249,8 +292,22 @@ impl App {
                 }
                 self.update_display_list();
             }
+            DisplayItem::RegionHeader(country, region) => {
+                let key = (country.clone(), region.clone());
+                if self.expanded_regions.contains(&key) {
+                    self.expanded_regions.remove(&key);
+                } else {
+                    self.expanded_regions.insert(key);
+                }
+                self.update_display_list();
+            }
             DisplayItem::Server(server_idx) => {
                 let idx = *server_idx;
+
+                // Tear down existing connection before reconnecting
+                if self.connection_status.is_some() {
+                    self.stop_wireguard().await;
+                }
 
                 if let Some(config_path) = self.create_config(idx, ConfigTarget::Runtime).await {
                     if let Some(server) = self.all_servers.get(idx) {
