@@ -130,6 +130,15 @@ enum LoopAction {
 }
 
 async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<LoopAction> {
+    // Global: disconnect works from any focus panel.
+    if let KeyCode::Char('d') = key.code {
+        if !key.modifiers.contains(event::KeyModifiers::CONTROL) && app.connection_status.is_some()
+        {
+            app.stop_wireguard().await;
+            return Ok(LoopAction::Continue);
+        }
+    }
+
     // Handle favorites panel navigation when focused
     if app.focus_panel == FocusPanel::Favorites {
         let fav_count = app.get_favorite_servers().len();
@@ -357,11 +366,6 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
                 app.page_down();
             }
         }
-        KeyCode::Char('d') if !key.modifiers.contains(event::KeyModifiers::CONTROL) => {
-            if app.connection_status.is_some() {
-                app.stop_wireguard().await;
-            }
-        }
         KeyCode::Char('d') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
             if app.split_view {
                 app.split_page_down();
@@ -424,15 +428,11 @@ async fn handle_normal_mode_key(app: &mut App, key: KeyEvent) -> io::Result<Loop
                 app.connect_to_selected().await;
             }
         }
-        KeyCode::Char(' ') => {
-            if !app.split_view {
-                app.toggle_current_selection();
-            }
+        KeyCode::Char(' ') if !app.split_view => {
+            app.toggle_current_selection();
         }
-        KeyCode::Esc => {
-            if app.split_view {
-                app.toggle_split_view();
-            }
+        KeyCode::Esc if app.split_view => {
+            app.toggle_split_view();
         }
         _ => {}
     }
